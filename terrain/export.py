@@ -140,6 +140,8 @@ def write_previews(cfg: Config, biomes: BiomeResult, height: HeightResult,
     shaded = np.clip(0.65 * shade + 0.35 * norm, 0.0, 1.0)
     shaded[h < 0.0] *= 0.6
     files = [save_gray8(out / "height_shaded.png", np.round(shaded * 255.0).astype(np.uint8))]
+    height8 = (encode_height16(h, cfg.export.sea_level_value) >> 8).astype(np.uint8)
+    files.append(save_gray8(out / "heightmap_8bit.png", height8))
 
     rgb = np.zeros((size, size, 3), dtype=np.float32)
     rgb[...] = SEA_COLOR

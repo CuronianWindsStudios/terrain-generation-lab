@@ -27,6 +27,20 @@ python -m terrain --seed 42 --size 1009 --diameter 90 --out out --debug
 
 The same seed always gives the same images.
 
+## Experiment UI
+
+```
+streamlit run ui.py
+```
+
+The command opens a page in the browser. The sidebar has the seed, the size, the diameter, and
+sliders for the landmass, biome, and heightmap parameters. Click Generate to run the pipeline.
+The page shows the color biome map, the hill shade, and the heightmap. Open the Steps section to
+see every sub-step image with its formula and its parameters. The Seed browser generates 6 seeds
+at a small size, and a button under each thumbnail loads that seed. The Save section copies the
+Unreal files and writes a `config.yaml` with the current settings to a folder you name. You can
+run that config later with `python -m terrain --config <folder>/config.yaml`.
+
 ## Output
 
 - `out/unreal/heightmap.png`: 16-bit heightmap. Sea level is at value 32768.
@@ -35,6 +49,7 @@ The same seed always gives the same images.
 - `out/unreal/params.json`: the seed, the parameters, the region list, and the Unreal import settings.
 - `out/preview/height_shaded.png`: a hill shade of the heightmap, for people.
 - `out/preview/biomes_color.png`: a color map of the 15 sub-types, for people.
+- `out/preview/heightmap_8bit.png`: an 8-bit copy of the heightmap, for image viewers.
 - `out/steps/` and `out/walkthrough.md`: one image per sub-step, with `--debug`.
 
 ## How the generator works

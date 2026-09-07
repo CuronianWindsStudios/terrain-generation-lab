@@ -1,13 +1,13 @@
 """Runs the five stages in order."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from terrain.biomes import BiomeResult, make_biomes
 from terrain.circle import CircleResult, make_circle
 from terrain.config import Config
-from terrain.debug import StepRecorder
+from terrain.debug import StepRecord, StepRecorder
 from terrain.export import export_unreal, write_previews
 from terrain.heightmap import HeightResult, make_heightmap
 from terrain.landmass import LandResult, make_landmasses
@@ -22,6 +22,7 @@ class PipelineResult:
     height: HeightResult
     files: list[Path]
     walkthrough: Path | None
+    steps: list[StepRecord] = field(default_factory=list)
 
 
 def run_pipeline(cfg: Config, out_dir: str | Path, debug: bool = False) -> PipelineResult:
@@ -36,4 +37,4 @@ def run_pipeline(cfg: Config, out_dir: str | Path, debug: bool = False) -> Pipel
     files = export_unreal(cfg, land, biomes, height, out / "unreal", seeds_used)
     files += write_previews(cfg, biomes, height, out / "preview")
     walkthrough = recorder.write_walkthrough()
-    return PipelineResult(cfg, circle, land, biomes, height, files, walkthrough)
+    return PipelineResult(cfg, circle, land, biomes, height, files, walkthrough, list(recorder.records))

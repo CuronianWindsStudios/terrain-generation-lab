@@ -76,4 +76,4 @@ def test_export_files(tmp_path):
     assert params["seed"] == 42
     assert params["unreal_import"]["resolution"] == SIZE
     previews = write_previews(cfg, biomes, height, tmp_path / "preview")
-    assert sorted(p.name for p in previews) == ["biomes_color.png", "height_shaded.png"]
+    assert sorted(p.name for p in previews) == ["biomes_color.png", "height_shaded.png", "heightmap_8bit.png"]
