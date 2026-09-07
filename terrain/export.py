@@ -44,10 +44,18 @@ def largest_remainder_255(weights: np.ndarray) -> np.ndarray:
 
 
 def make_weight_maps(biome_ids: np.ndarray, land_mask: np.ndarray, n_types: int,
-                     blur_px: float) -> np.ndarray:
-    idx = ndimage.distance_transform_edt(~land_mask, return_distances=False, return_indices=True)
+                     blur_px: float, seabed_index: int = 0) -> np.ndarray:
+    """One weight map per biome type. Sea pixels near the coast take the nearest land biome.
+    Further out, the sea blends to the seabed biome (the coast biome, sand)."""
+    sea_distance, idx = ndimage.distance_transform_edt(~land_mask, return_indices=True)
     filled = biome_ids[idx[0], idx[1]]
     onehot = np.stack([(filled == i + 1) for i in range(n_types)]).astype(np.float32)
+    shelf_px = max(4.0 * blur_px, 1.0)
+    t = (sea_distance / shelf_px).clip(0.0, 1.0).astype(np.float32)
+    t = t * t * (3.0 - 2.0 * t)
+    seabed = np.zeros_like(onehot)
+    seabed[seabed_index] = 1.0
+    onehot = onehot * (1.0 - t)[None] + seabed * t[None]
     blurred = ndimage.gaussian_filter(onehot, sigma=(0.0, blur_px, blur_px))
     weights = blurred / np.maximum(blurred.sum(axis=0, keepdims=True), 1e-6)
     return largest_remainder_255(weights)
@@ -78,7 +86,10 @@ def export_unreal(cfg: Config, land: LandResult, biomes: BiomeResult, height: He
     files.append(save_gray16(out / "heightmap.png",
                              encode_height16(height.height, cfg.export.sea_level_value)))
 
-    weights = make_weight_maps(biomes.biome_ids, land.land_mask, n_types, cfg.export.weight_blur_px)
+    coast_types = [i for i, t in enumerate(cfg.biomes.types) if t.placement == "coast"]
+    seabed_index = coast_types[0] if coast_types else 0
+    weights = make_weight_maps(biomes.biome_ids, land.land_mask, n_types,
+                               cfg.export.weight_blur_px, seabed_index)
     for i, t in enumerate(cfg.biomes.types):
         files.append(save_gray8(out / f"weight_{t.name}.png", weights[i]))
 
@@ -124,7 +135,7 @@ def write_previews(cfg: Config, biomes: BiomeResult, height: HeightResult,
     out = Path(out_dir)
     h = height.height
     size = h.shape[0]
-    shade = hillshade(h, z_factor=size / 4.0)
+    shade = hillshade(h, z_factor=size / 12.0)
     norm = (h - h.min()) / max(float(h.max() - h.min()), 1e-6)
     shaded = np.clip(0.65 * shade + 0.35 * norm, 0.0, 1.0)
     shaded[h < 0.0] *= 0.6

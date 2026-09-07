@@ -115,17 +115,18 @@ circle:
 
 landmass:
   count: 3
-  seed_area_pct: 60         # seed points lie inside this % of the circle radius
-  min_separation_pct: 70    # minimum distance between seed points, as % of the radius
-  radius_pct: [28, 38]      # landmass radius, random in this range, as % of the circle radius
+  seed_area_pct: 55         # seed points lie inside this % of the circle radius
+  min_separation_pct: 75    # minimum distance between seed points, as % of the radius
+  radius_pct: [100, 120]    # landmass falloff radius, random in this range, as % of the circle radius
+  warp_pct: 15              # noise warp of all distances, as % of the radius
+  channel_pct: 22           # width of the sea channel between landmasses, as % of the radius
   noise:
-    octaves: 6
-    frequency: 3.0          # cycles across the image width, first octave
+    octaves: 7
+    frequency: 5.0          # cycles across the image width, first octave
     lacunarity: 2.0
     persistence: 0.5
-  noise_strength: 0.45      # how far the noise moves the coast
-  threshold: 0.5            # falloff + noise above this value is land
-  min_lake_area_px: 200     # lakes smaller than this are filled
+  threshold: 0.28           # noise * shape_mask above this value is land
+  min_lake_area_px: 200     # lakes and islands smaller than this are removed
   max_retries: 10           # tries with seed + 1 when the count is wrong
 
 biomes:
@@ -135,9 +136,9 @@ biomes:
   inland_fraction: 0.7      # "inland" seeds lie beyond this fraction of the max coast distance
   max_retries: 10
   warp:
-    strength_px: 60
-    frequency: 4.0
-    octaves: 4
+    strength_px: 90
+    frequency: 5.0
+    octaves: 5
   types:
     - {name: sea_side,         label: "Sea Side (Neringa)", placement: coast}
     - {name: marshlands,       label: "Marshlands",         placement: low}
@@ -146,16 +147,18 @@ biomes:
     - {name: mountain_range,   label: "Mountain Range",     placement: inland}
 
 heightmap:
-  coast_distance_px: 120    # distance from the coast where the base curve reaches 1
+  coast_distance_px: 80     # distance from the coast where the base curve reaches 1
+  coast_blur_px: 12         # blur of the coast distance, removes creases
   profile_blur_px: 25       # blur of the biome profile maps
   profiles:                 # heights are fractions of the land range 0..1
     sea_side:         {base: 0.05, amplitude: 0.04, frequency: 12.0, octaves: 3, ridged: false}
     marshlands:       {base: 0.03, amplitude: 0.01, frequency:  6.0, octaves: 2, ridged: false}
     ancient_grove:    {base: 0.25, amplitude: 0.12, frequency:  5.0, octaves: 5, ridged: false}
     enchanted_forest: {base: 0.30, amplitude: 0.15, frequency:  6.0, octaves: 5, ridged: false}
-    mountain_range:   {base: 0.60, amplitude: 0.40, frequency:  4.0, octaves: 6, ridged: true}
+    mountain_range:   {base: 0.60, amplitude: 0.40, frequency:  8.0, octaves: 6, ridged: true}
   seabed_depth: 0.30        # seabed floor as a fraction of the range below sea level
   seabed_distance_px: 150   # distance from the coast where the seabed reaches its floor
+  seabed_blur_px: 10        # blur of the seabed, removes creases
 
 export:
   sea_level_value: 32768
@@ -202,16 +205,22 @@ Input: `CircleResult`, landmass config, seed. Output: `LandResult(land_mask, lan
 | Step | Image | Description |
 |---|---|---|
 | 2a | `02a_seed_points.png` | 3 seed points as white dots on black. The points lie inside `seed_area_pct` of the radius. Rejection sampling keeps the distance between points `>= min_separation_pct` of the radius. After 1000 rejections the separation is halved. |
-| 2b | `02b_radial_falloff.png` | For each seed: `falloff = clamp(1 - distance / landmass_radius, 0, 1)`. The image shows the maximum of the 3 fields. |
-| 2c | `02c_noise.png` | Fractal noise from `landmass.noise`. |
-| 2d | `02d_land_field.png` | `field = max_falloff + noise_strength * (noise - 0.5)`. Pixels with `field > threshold` and inside the circle mask are land. |
-| 2e | `02e_land_mask.png` | Keep the 3 largest connected areas (`scipy.ndimage.label`). Fill lakes smaller than `min_lake_area_px`. |
-| 2f | `02f_landmass_ids.png` | Each landmass gets an ID from 1 to 3, ordered by area, largest first. The image shows 3 gray levels. |
+| 2b | `02b_warp_noise.png` | Two fractal noise fields give each pixel an offset `(dx, dy)` of up to `warp_pct` of the radius. All distances below use the warped pixel position `pixel + offset`. The image shows `dx`. |
+| 2c | `02c_radial_falloff.png` | For each seed: `falloff = clamp(1 - distance / landmass_radius, 0, 1)`. The image shows the maximum of the 3 fields. |
+| 2d | `02d_shape_mask.png` | Each pixel belongs to its nearest seed. `channel = smoothstep((d2 - d1) / channel_px)` fades to 0 at the border between two seeds. `shape_mask = max_falloff * channel * edge_band`. This guarantees a sea channel between the landmasses and a ragged coast at the circle edge. |
+| 2e | `02e_noise.png` | Fractal noise from `landmass.noise`. |
+| 2f | `02f_land_field.png` | `field = noise * shape_mask`. Pixels with `field > threshold` and inside the circle mask are land. Near a seed the mask is 1, so most pixels are land. Near the coast only high noise values are land, so the coast is ragged. |
+| 2g | `02g_land_mask.png` | Keep the 3 largest connected areas (`scipy.ndimage.label`). Remove islands and fill lakes smaller than `min_lake_area_px`. |
+| 2h | `02h_landmass_ids.png` | Each landmass gets an ID from 1 to 3, ordered by area, largest first. The image shows 3 gray levels. |
 
-Retry rule: if the count of connected areas after step 2e is not 3, the stage repeats
+Retry rule: if the count of connected areas after step 2g is not 3, the stage repeats
 with `seed + 1`, up to `max_retries` times. Each try is recorded in the walkthrough.
 After the last try, the stage raises `GenerationError` with the message:
-`"Seed 42 gave 2 landmasses after 10 tries. Increase landmass.radius_pct or decrease landmass.noise_strength."`
+`"Seed 42 gave 2 landmasses after 10 tries. Decrease landmass.threshold or increase landmass.channel_pct."`
+
+Design note: an earlier version added the noise to the falloff, `falloff + strength * (noise - 0.5)`.
+That version merged two landmasses in about one try of three, and the coast followed the circle.
+The multiplicative field with the channel gives 3 landmasses on the first try for every seed tested.
 
 ## 10. Stage 3: biomes (`biomes.py`)
 
@@ -266,11 +275,11 @@ Sea is in `[-seabed_depth, 0]`.
 | Step | Image | Description |
 |---|---|---|
 | 4a | `04a_signed_coast_distance.png` | Distance to the coast. Land is positive. Sea is negative. |
-| 4b | `04b_coast_curve.png` | `curve = smoothstep(clamp(distance / coast_distance_px, 0, 1))` on land, 0 on sea. |
+| 4b | `04b_coast_curve.png` | The distance is blurred with a Gaussian of `coast_blur_px` first, so the curve has no creases on the medial axis. `curve = smoothstep(clamp(blurred_distance / coast_distance_px, 0, 1))` on land, 0 on sea. |
 | 4c | `04c_profile_base.png`, `04c_profile_amplitude.png` | Weight maps: one-hot biome masks, blurred with a Gaussian of `profile_blur_px`, normalized to sum 1 on land. `base_map = sum(w_b * base_b)`. `amplitude_map = sum(w_b * amplitude_b)`. |
 | 4d | `04d_biome_noise.png` | One noise field per biome type from its profile. Ridged where `ridged` is true. `noise_map = sum(w_b * noise_b)`. |
 | 4e | `04e_land_height.png` | `land = clamp(curve * (base_map + amplitude_map * (2 * noise_map - 1)), 0, 1)`. The whole sum is multiplied by `curve`, so the coast stays at 0. |
-| 4f | `04f_seabed.png` | `seabed = -seabed_depth * smoothstep(clamp(-distance / seabed_distance_px, 0, 1))`. The seabed is then blended to `-seabed_depth` with `(1 - edge_band)` outside the band, so the circle edge and the outside of the circle sit at the floor. |
+| 4f | `04f_seabed.png` | `seabed = -seabed_depth * smoothstep(clamp(-distance / seabed_distance_px, 0, 1))`. The seabed is then blended to `-seabed_depth` with `(1 - edge_band)` outside the band, blurred with a Gaussian of `seabed_blur_px` to remove creases, and blended with the edge band again, so the circle edge and the outside of the circle sit exactly at the floor. |
 | 4g | `04g_height.png` | `height = land` where land, `seabed` where sea. The image maps `[-seabed_depth, 1]` to `[0, 255]`. |
 
 ## 12. Stage 5: Unreal export (`export.py`)
@@ -278,7 +287,7 @@ Sea is in `[-seabed_depth, 0]`.
 | File | Rule |
 |---|---|
 | `heightmap.png` | `uint16 = round(32768 + height * 32767)` for `height >= 0`. `uint16 = round(32768 + height * 32768)` for `height < 0`. Sea level is exactly 32768. |
-| `weight_<biome>.png` | Start with the one-hot biome mask. Sea pixels take the biome of the nearest land pixel (`distance_transform_edt` with `return_indices`). Blur with a Gaussian of `weight_blur_px`. Normalize, so the 5 values add up to 255 at each pixel. |
+| `weight_<biome>.png` | Start with the one-hot biome mask. Sea pixels take the biome of the nearest land pixel (`distance_transform_edt` with `return_indices`). Further out the sea blends to the seabed biome, the first biome type with placement `coast`, over `4 * weight_blur_px` from the coast. Blur with a Gaussian of `weight_blur_px`. Normalize with the largest remainder method, so the 5 values add up to exactly 255 at each pixel. |
 | `subtype_<biome>_<A,B,C>.png` | One-hot mask of the sub-type, 0 or 255, no blur. |
 | `params.json` | The full resolved config, the seed, the seeds used after retries, and `unreal_import: {resolution: 1009, section_size: "63x63", sections_per_component: "2x2", components: "8x8", z_scale: 100, sea_level_value: 32768}`. |
 

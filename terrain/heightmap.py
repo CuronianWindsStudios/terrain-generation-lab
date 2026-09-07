@@ -44,13 +44,14 @@ def make_heightmap(circle: CircleResult, land: LandResult, biomes: BiomeResult,
         {"max_land_px": round(float(signed.max()), 1), "max_sea_px": round(float(-signed.min()), 1)},
     )
 
-    curve = smoothstep(np.clip(signed / cfg.coast_distance_px, 0.0, 1.0)).astype(np.float32)
+    smooth_signed = ndimage.gaussian_filter(signed, sigma=cfg.coast_blur_px)
+    curve = smoothstep(np.clip(smooth_signed / cfg.coast_distance_px, 0.0, 1.0)).astype(np.float32)
     curve[~land_mask] = 0.0
     recorder.step(
         "04b", "Coast curve", curve,
-        "A smooth curve from 0 at the coast to 1 at coast_distance_px inland. "
-        "The curve keeps the coast at sea level.",
-        {"coast_distance_px": cfg.coast_distance_px},
+        "A smooth curve from 0 at the coast to 1 at coast_distance_px inland. The generator blurs "
+        "the coast distance first, so the curve has no creases. The curve keeps the coast at sea level.",
+        {"coast_distance_px": cfg.coast_distance_px, "coast_blur_px": cfg.coast_blur_px},
     )
 
     weights = biome_weights(biomes.biome_ids, n_types, cfg.profile_blur_px)
@@ -96,12 +97,16 @@ def make_heightmap(circle: CircleResult, land: LandResult, biomes: BiomeResult,
     depth = cfg.seabed_depth
     seabed = -depth * smoothstep(np.clip(-signed / cfg.seabed_distance_px, 0.0, 1.0))
     seabed = seabed * circle.edge_band + (-depth) * (1.0 - circle.edge_band)
-    seabed = seabed.astype(np.float32)
+    seabed = ndimage.gaussian_filter(seabed.astype(np.float32), sigma=cfg.seabed_blur_px)
+    seabed = seabed * circle.edge_band + (-depth) * (1.0 - circle.edge_band)
+    seabed = np.minimum(seabed, 0.0).astype(np.float32)
     recorder.step(
         "04f", "Seabed", seabed,
         "The seabed goes down from 0 at the coast to the floor at seabed_distance_px. "
-        "The edge band blends the seabed to the floor at the circle edge and outside the circle.",
-        {"seabed_depth": depth, "seabed_distance_px": cfg.seabed_distance_px},
+        "The edge band blends the seabed to the floor at the circle edge and outside the circle. "
+        "A blur removes the creases between the landmasses.",
+        {"seabed_depth": depth, "seabed_distance_px": cfg.seabed_distance_px,
+         "seabed_blur_px": cfg.seabed_blur_px},
     )
 
     height = np.where(land_mask, land_height, seabed).astype(np.float32)

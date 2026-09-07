@@ -98,18 +98,31 @@ def _attempt(circle: CircleResult, cfg: LandmassConfig, rng, recorder: StepRecor
          "seeds": [(round(x), round(y)) for x, y in seeds]},
     )
 
+    warp_px = radius * cfg.warp_pct / 100.0
+    dx = warp_px * (fractal_noise((size, size), 4, 3.0, 2.0, 0.5, rng) - 0.5) * 2.0
+    dy = warp_px * (fractal_noise((size, size), 4, 3.0, 2.0, 0.5, rng) - 0.5) * 2.0
+    recorder.step(
+        f"02b{tag}", "Warp noise", dx,
+        "Two noise fields give each pixel an offset (dx, dy). The generator measures all distances "
+        "from the warped pixel position. This bends the landmass shapes and the channel between them. "
+        "The image shows dx.",
+        {"warp_pct": cfg.warp_pct, "warp_px": round(warp_px, 1)},
+    )
+
     yy, xx = np.mgrid[0:size, 0:size].astype(np.float32)
+    px = xx + dx
+    py = yy + dy
     falloff = np.zeros((size, size), dtype=np.float32)
     radii = []
     distances = []
     for sx, sy in seeds:
         r = rng.uniform(cfg.radius_pct[0], cfg.radius_pct[1]) / 100.0 * radius
         radii.append(round(r, 1))
-        d = np.hypot(xx - sx, yy - sy)
+        d = np.hypot(px - sx, py - sy)
         distances.append(d)
         falloff = np.maximum(falloff, np.clip(1.0 - d / r, 0.0, 1.0))
     recorder.step(
-        f"02b{tag}", "Radial falloff", falloff,
+        f"02c{tag}", "Radial falloff", falloff,
         "Each seed point gets a radial falloff: 1 at the seed point, 0 at the landmass radius. "
         "The image shows the maximum of the 3 fields.",
         {"radius_pct": list(cfg.radius_pct), "radii_px": radii},
@@ -118,41 +131,40 @@ def _attempt(circle: CircleResult, cfg: LandmassConfig, rng, recorder: StepRecor
     channel_px = radius * cfg.channel_pct / 100.0
     sorted_d = np.sort(np.stack(distances), axis=0)
     channel = smoothstep(np.clip((sorted_d[1] - sorted_d[0]) / max(channel_px, 1e-6), 0.0, 1.0))
-    shaped = (falloff * channel * circle.edge_band).astype(np.float32)
+    shape_mask = (falloff * channel * circle.edge_band).astype(np.float32)
     recorder.step(
-        f"02b-2{tag}", "Channel and edge fade", shaped,
+        f"02d{tag}", "Shape mask", shape_mask,
         "Each pixel belongs to its nearest seed point. Near the border between two seed points, the "
-        "field fades to 0. This makes a channel of sea between the landmasses, so they do not merge. "
-        "The edge band also fades the field to 0 at the circle edge, so the coast does not follow "
-        "the circle.",
+        "mask fades to 0. This makes a channel of sea between the landmasses, so they do not merge. "
+        "The edge band also fades the mask to 0 at the circle edge.",
         {"channel_pct": cfg.channel_pct, "channel_px": round(channel_px, 1)},
     )
-    falloff = shaped
 
     noise = fractal_noise(
         (size, size), cfg.noise.octaves, cfg.noise.frequency,
         cfg.noise.lacunarity, cfg.noise.persistence, rng,
     )
     recorder.step(
-        f"02c{tag}", "Noise", noise,
+        f"02e{tag}", "Noise", noise,
         "Fractal noise with several octaves. The noise makes the coast irregular.",
         {"octaves": cfg.noise.octaves, "frequency": cfg.noise.frequency,
          "lacunarity": cfg.noise.lacunarity, "persistence": cfg.noise.persistence},
     )
 
-    field = falloff + cfg.noise_strength * (noise - 0.5)
+    field = noise * shape_mask
     raw_land = (field > cfg.threshold) & circle.mask
     recorder.step(
-        f"02d{tag}", "Land field", np.clip(field, 0.0, 1.0),
-        "field = falloff + noise_strength * (noise - 0.5). "
-        "Pixels with field > threshold inside the circle are land.",
-        {"noise_strength": cfg.noise_strength, "threshold": cfg.threshold},
+        f"02f{tag}", "Land field", field,
+        "field = noise * shape_mask. Pixels with field > threshold inside the circle are land. "
+        "Near a seed point the mask is 1, so most pixels are land. Near the coast the mask is small, "
+        "so only high noise values are land. This makes a ragged coast.",
+        {"threshold": cfg.threshold},
     )
 
     land = _keep_components(raw_land, cfg.count, cfg.min_lake_area_px)
     land = _fill_lakes(land, cfg.min_lake_area_px)
     recorder.step(
-        f"02e{tag}", "Land mask", land,
+        f"02g{tag}", "Land mask", land,
         "The generator keeps the 3 largest connected areas. It removes islands and fills lakes "
         "smaller than min_lake_area_px.",
         {"min_lake_area_px": cfg.min_lake_area_px},
@@ -160,7 +172,7 @@ def _attempt(circle: CircleResult, cfg: LandmassConfig, rng, recorder: StepRecor
 
     ids, count = _label_by_area(land)
     recorder.step(
-        f"02f{tag}", "Landmass IDs", ids,
+        f"02h{tag}", "Landmass IDs", ids,
         "Each landmass gets an ID from 1 to 3. The largest landmass is 1. Sea is 0.",
         {"count": count, "areas_px": [int((ids == i).sum()) for i in range(1, count + 1)]},
     )
@@ -184,5 +196,5 @@ def make_landmasses(circle: CircleResult, cfg: LandmassConfig, seed: int,
         )
     raise GenerationError(
         f"Seed {seed} gave {count} landmasses after {cfg.max_retries} tries. "
-        "Increase landmass.radius_pct or decrease landmass.noise_strength."
+        "Decrease landmass.threshold or increase landmass.channel_pct."
     )

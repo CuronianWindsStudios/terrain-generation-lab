@@ -37,22 +37,22 @@ class CircleConfig:
 @dataclass
 class LandmassConfig:
     count: int = 3
-    seed_area_pct: float = 50.0
-    min_separation_pct: float = 70.0
-    radius_pct: tuple[float, float] = (55.0, 65.0)
-    channel_pct: float = 12.0
-    noise: NoiseConfig = field(default_factory=NoiseConfig)
-    noise_strength: float = 0.45
-    threshold: float = 0.4
+    seed_area_pct: float = 55.0
+    min_separation_pct: float = 75.0
+    radius_pct: tuple[float, float] = (100.0, 120.0)
+    warp_pct: float = 15.0
+    channel_pct: float = 22.0
+    noise: NoiseConfig = field(default_factory=lambda: NoiseConfig(octaves=7, frequency=5.0))
+    threshold: float = 0.28
     min_lake_area_px: int = 200
     max_retries: int = 10
 
 
 @dataclass
 class WarpConfig:
-    strength_px: float = 60.0
-    frequency: float = 4.0
-    octaves: int = 4
+    strength_px: float = 90.0
+    frequency: float = 5.0
+    octaves: int = 5
 
 
 @dataclass
@@ -98,17 +98,19 @@ def default_profiles() -> dict[str, Profile]:
         "marshlands": Profile(0.03, 0.01, 6.0, 2),
         "ancient_grove": Profile(0.25, 0.12, 5.0, 5),
         "enchanted_forest": Profile(0.30, 0.15, 6.0, 5),
-        "mountain_range": Profile(0.60, 0.40, 4.0, 6, ridged=True),
+        "mountain_range": Profile(0.60, 0.40, 8.0, 6, ridged=True),
     }
 
 
 @dataclass
 class HeightmapConfig:
-    coast_distance_px: float = 120.0
+    coast_distance_px: float = 80.0
+    coast_blur_px: float = 12.0
     profile_blur_px: float = 25.0
     profiles: dict[str, Profile] = field(default_factory=default_profiles)
     seabed_depth: float = 0.3
     seabed_distance_px: float = 150.0
+    seabed_blur_px: float = 10.0
 
 
 @dataclass
@@ -156,9 +158,9 @@ def config_from_dict(data: dict) -> Config:
             seed_area_pct=float(lm["seed_area_pct"]),
             min_separation_pct=float(lm["min_separation_pct"]),
             radius_pct=tuple(float(v) for v in lm["radius_pct"]),
+            warp_pct=float(lm["warp_pct"]),
             channel_pct=float(lm["channel_pct"]),
             noise=NoiseConfig(**lm["noise"]),
-            noise_strength=float(lm["noise_strength"]),
             threshold=float(lm["threshold"]),
             min_lake_area_px=int(lm["min_lake_area_px"]),
             max_retries=int(lm["max_retries"]),
@@ -174,10 +176,12 @@ def config_from_dict(data: dict) -> Config:
         ),
         heightmap=HeightmapConfig(
             coast_distance_px=float(hm["coast_distance_px"]),
+            coast_blur_px=float(hm["coast_blur_px"]),
             profile_blur_px=float(hm["profile_blur_px"]),
             profiles={k: Profile(**v) for k, v in hm["profiles"].items()},
             seabed_depth=float(hm["seabed_depth"]),
             seabed_distance_px=float(hm["seabed_distance_px"]),
+            seabed_blur_px=float(hm["seabed_blur_px"]),
         ),
         export=ExportConfig(**d["export"]),
     )
