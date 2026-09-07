@@ -2,20 +2,20 @@ import numpy as np
 
 from terrain.biomes import make_biomes
 from terrain.circle import make_circle
-from terrain.config import BiomesConfig, CircleConfig, HeightmapConfig, LandmassConfig
+from terrain.config import BiomesConfig, CircleConfig, HeightmapConfig, LandmassConfig, Profile
 from terrain.debug import StepRecorder
-from terrain.heightmap import biome_weights, make_heightmap
+from terrain.heightmap import make_heightmap
 from terrain.landmass import make_landmasses
 
 SIZE = 253
 
 
-def _world(seed=42):
+def _world(seed=42, cfg=None):
     rec = StepRecorder(None, False)
     circle = make_circle(SIZE, CircleConfig(), rec)
     land = make_landmasses(circle, LandmassConfig(), seed, rec)
     biomes = make_biomes(land, BiomesConfig(), seed, rec)
-    cfg = HeightmapConfig()
+    cfg = cfg or HeightmapConfig()
     return circle, land, biomes, cfg, make_heightmap(circle, land, biomes, cfg, seed, rec)
 
 
@@ -35,17 +35,16 @@ def test_coast_is_near_zero_and_outside_is_floor():
     assert np.allclose(res.height[~circle.mask], -cfg.seabed_depth)
 
 
-def test_mountains_higher_than_marsh():
-    circle, land, biomes, cfg, res = _world()
-    mountain = res.height[biomes.biome_ids == 5].mean()
-    marsh = res.height[biomes.biome_ids == 2].mean()
-    assert mountain > marsh
+def test_all_biomes_share_the_profile():
+    circle, land, biomes, cfg, res = _world(cfg=HeightmapConfig(coast_distance_px=15.0, coast_blur_px=3.0))
+    inland = biomes.coast_distance > cfg.coast_distance_px
+    means = [float(res.height[inland & (biomes.biome_ids == b)].mean()) for b in range(1, 6)
+             if (inland & (biomes.biome_ids == b)).sum() > 50]
+    assert len(means) >= 3
+    assert max(means) - min(means) < 0.15
 
 
-def test_biome_weights_sum_to_one_on_land():
-    ids = np.zeros((32, 32), dtype=np.int32)
-    ids[4:28, 4:16] = 1
-    ids[4:28, 16:28] = 2
-    w = biome_weights(ids, 2, 3.0)
-    assert w.shape == (2, 32, 32)
-    assert np.allclose(w.sum(0)[ids > 0], 1.0)
+def test_higher_base_gives_higher_land():
+    _, land, _, _, low = _world(cfg=HeightmapConfig(profile=Profile(0.2, 0.1, 6.0, 4)))
+    _, _, _, _, high = _world(cfg=HeightmapConfig(profile=Profile(0.6, 0.1, 6.0, 4)))
+    assert high.height[land.land_mask].mean() > low.height[land.land_mask].mean()

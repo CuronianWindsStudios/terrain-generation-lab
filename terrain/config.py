@@ -92,22 +92,11 @@ class Profile:
     ridged: bool = False
 
 
-def default_profiles() -> dict[str, Profile]:
-    return {
-        "sea_side": Profile(0.05, 0.04, 12.0, 3),
-        "marshlands": Profile(0.03, 0.01, 6.0, 2),
-        "ancient_grove": Profile(0.25, 0.12, 5.0, 5),
-        "enchanted_forest": Profile(0.30, 0.15, 6.0, 5),
-        "mountain_range": Profile(0.60, 0.40, 8.0, 6, ridged=True),
-    }
-
-
 @dataclass
 class HeightmapConfig:
     coast_distance_px: float = 80.0
     coast_blur_px: float = 12.0
-    profile_blur_px: float = 25.0
-    profiles: dict[str, Profile] = field(default_factory=default_profiles)
+    profile: Profile = field(default_factory=lambda: Profile(0.30, 0.15, 6.0, 5, ridged=False))
     seabed_depth: float = 0.3
     seabed_distance_px: float = 150.0
     seabed_blur_px: float = 10.0
@@ -177,8 +166,7 @@ def config_from_dict(data: dict) -> Config:
         heightmap=HeightmapConfig(
             coast_distance_px=float(hm["coast_distance_px"]),
             coast_blur_px=float(hm["coast_blur_px"]),
-            profile_blur_px=float(hm["profile_blur_px"]),
-            profiles={k: Profile(**v) for k, v in hm["profiles"].items()},
+            profile=Profile(**hm["profile"]),
             seabed_depth=float(hm["seabed_depth"]),
             seabed_distance_px=float(hm["seabed_distance_px"]),
             seabed_blur_px=float(hm["seabed_blur_px"]),
@@ -202,13 +190,13 @@ def validate(cfg: Config) -> None:
     for t in cfg.biomes.types:
         if t.placement not in PLACEMENTS:
             raise ConfigError(f"placement of biome {t.name} must be one of {PLACEMENTS}. Got {t.placement}.")
-        if t.name not in cfg.heightmap.profiles:
-            raise ConfigError(f"heightmap.profiles has no entry for biome {t.name}.")
     lo, hi = cfg.biomes.seeds_per_landmass
     if lo < len(cfg.biomes.types) or hi < lo:
         raise ConfigError(
             f"biomes.seeds_per_landmass must be [lo, hi] with lo >= 5 and hi >= lo. Got {lo}, {hi}."
         )
+    if cfg.heightmap.profile.octaves < 1:
+        raise ConfigError(f"heightmap.profile.octaves must be >= 1. Got {cfg.heightmap.profile.octaves}.")
     if not 0 < cfg.heightmap.seabed_depth <= 1:
         raise ConfigError(f"heightmap.seabed_depth must be in (0, 1]. Got {cfg.heightmap.seabed_depth}.")
 

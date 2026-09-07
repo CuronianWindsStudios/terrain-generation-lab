@@ -44,13 +44,12 @@ biomes:
 heightmap:
   coast_distance_px: 80     # distance from the coast where the base curve reaches 1
   coast_blur_px: 12         # blur of the coast distance, removes creases
-  profile_blur_px: 25       # blur of the biome profile maps
-  profiles:                 # heights are fractions of the land range 0..1
-    sea_side:         {base: 0.05, amplitude: 0.04, frequency: 12.0, octaves: 3, ridged: false}
-    marshlands:       {base: 0.03, amplitude: 0.01, frequency:  6.0, octaves: 2, ridged: false}
-    ancient_grove:    {base: 0.25, amplitude: 0.12, frequency:  5.0, octaves: 5, ridged: false}
-    enchanted_forest: {base: 0.30, amplitude: 0.15, frequency:  6.0, octaves: 5, ridged: false}
-    mountain_range:   {base: 0.60, amplitude: 0.40, frequency:  8.0, octaves: 6, ridged: true}
+  profile:                  # one height profile for all biomes, heights are fractions of 0..1
+    base: 0.30              # height of the land plateau
+    amplitude: 0.15         # height of the noise hills above and below the base
+    frequency: 6.0          # cycles across the image width, first octave
+    octaves: 5
+    ridged: false           # true gives sharp crests
   seabed_depth: 0.30        # seabed floor as a fraction of the range below sea level
   seabed_distance_px: 150   # distance from the coast where the seabed reaches its floor
   seabed_blur_px: 10        # blur of the seabed, removes creases

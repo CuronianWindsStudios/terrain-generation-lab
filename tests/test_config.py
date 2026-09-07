@@ -14,7 +14,7 @@ def test_defaults_are_valid():
     assert cfg.size == 1009
     assert cfg.landmass.count == 3
     assert len(cfg.biomes.types) == 5
-    assert set(cfg.heightmap.profiles) == {t.name for t in cfg.biomes.types}
+    assert cfg.heightmap.profile.ridged is False
 
 
 def test_override_merges_nested_values():
@@ -29,11 +29,16 @@ def test_invalid_size_raises():
         config_from_dict({"size": 1000})
 
 
-def test_missing_profile_raises():
+def test_bad_placement_raises():
     types = config_to_dict(Config())["biomes"]["types"]
-    types[0]["name"] = "lagoon"
-    with pytest.raises(ConfigError, match="lagoon"):
+    types[0]["placement"] = "sky"
+    with pytest.raises(ConfigError, match="sky"):
         config_from_dict({"biomes": {"types": types}})
+
+
+def test_bad_profile_raises():
+    with pytest.raises(ConfigError, match="octaves"):
+        config_from_dict({"heightmap": {"profile": {"octaves": 0}}})
 
 
 def test_load_yaml_and_cli_override(tmp_path):

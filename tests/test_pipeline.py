@@ -27,7 +27,7 @@ def test_debug_writes_steps_and_walkthrough(tmp_path):
     assert len(steps) >= 20
     assert res.walkthrough == tmp_path / "walkthrough.md"
     text = res.walkthrough.read_text(encoding="utf-8")
-    assert "## Step 01a" in text and "## Step 04g" in text
+    assert "## Step 01a" in text and "## Step 04f" in text
 
 
 def test_no_debug_writes_no_steps(tmp_path):

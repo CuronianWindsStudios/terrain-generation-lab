@@ -83,17 +83,17 @@ with st.sidebar:
     with st.expander("Heightmap"):
         hm = DEFAULTS.heightmap
         coast_distance_px = st.slider("Coast rise distance px", 10.0, 300.0, hm.coast_distance_px, 10.0)
-        profile_blur_px = st.slider("Biome blend px", 1.0, 80.0, hm.profile_blur_px, 1.0)
         seabed_depth = st.slider("Seabed depth", 0.05, 1.0, hm.seabed_depth, 0.05)
-        profile_values = {}
-        for t in bi.types:
-            p = hm.profiles[t.name]
-            st.caption(t.label)
-            c1, c2 = st.columns(2)
-            profile_values[f"profile_{t.name}_base"] = c1.slider(
-                "base", 0.0, 1.0, p.base, 0.01, key=f"base_{t.name}")
-            profile_values[f"profile_{t.name}_amplitude"] = c2.slider(
-                "amplitude", 0.0, 1.0, p.amplitude, 0.01, key=f"amp_{t.name}")
+        st.caption("Height profile, shared by all biomes")
+        p = hm.profile
+        profile_values = {
+            "profile_base": st.slider("Base height", 0.0, 1.0, p.base, 0.01,
+                                      help="Height of the land plateau, as a fraction of the range."),
+            "profile_amplitude": st.slider("Hill amplitude", 0.0, 1.0, p.amplitude, 0.01),
+            "profile_frequency": st.slider("Hill frequency", 1.0, 16.0, p.frequency, 0.5),
+            "profile_octaves": int(st.slider("Hill octaves", 1, 9, p.octaves, 1)),
+            "profile_ridged": st.toggle("Ridged crests", value=p.ridged),
+        }
 
     debug = st.checkbox("Record sub-steps", value=True)
     run = st.button("Generate", type="primary", width="stretch")
@@ -106,7 +106,7 @@ values = {
     "seed_area_pct": seed_area_pct, "min_separation_pct": min_separation_pct,
     "biome_warp_px": biome_warp_px, "seeds_min": int(seeds_min), "seeds_max": int(seeds_max),
     "coast_band_px": coast_band_px, "coast_distance_px": coast_distance_px,
-    "profile_blur_px": profile_blur_px, "seabed_depth": seabed_depth,
+    "seabed_depth": seabed_depth,
     **profile_values,
 }
 overrides = build_overrides(values)

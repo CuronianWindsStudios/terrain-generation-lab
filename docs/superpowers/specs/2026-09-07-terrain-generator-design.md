@@ -151,13 +151,12 @@ biomes:
 heightmap:
   coast_distance_px: 80     # distance from the coast where the base curve reaches 1
   coast_blur_px: 12         # blur of the coast distance, removes creases
-  profile_blur_px: 25       # blur of the biome profile maps
-  profiles:                 # heights are fractions of the land range 0..1
-    sea_side:         {base: 0.05, amplitude: 0.04, frequency: 12.0, octaves: 3, ridged: false}
-    marshlands:       {base: 0.03, amplitude: 0.01, frequency:  6.0, octaves: 2, ridged: false}
-    ancient_grove:    {base: 0.25, amplitude: 0.12, frequency:  5.0, octaves: 5, ridged: false}
-    enchanted_forest: {base: 0.30, amplitude: 0.15, frequency:  6.0, octaves: 5, ridged: false}
-    mountain_range:   {base: 0.60, amplitude: 0.40, frequency:  8.0, octaves: 6, ridged: true}
+  profile:                  # one height profile for all biomes, heights are fractions of 0..1
+    base: 0.30
+    amplitude: 0.15
+    frequency: 6.0
+    octaves: 5
+    ridged: false
   seabed_depth: 0.30        # seabed floor as a fraction of the range below sea level
   seabed_distance_px: 150   # distance from the coast where the seabed reaches its floor
   seabed_blur_px: 10        # blur of the seabed, removes creases
@@ -220,6 +219,11 @@ with `seed + 1`, up to `max_retries` times. Each try is recorded in the walkthro
 After the last try, the stage raises `GenerationError` with the message:
 `"Seed 42 gave 2 landmasses after 10 tries. Decrease landmass.threshold or increase landmass.channel_pct."`
 
+Design note (2026-09-07, later the same day): the first version had one height profile per biome
+type, with Mountain Range high and ridged and Marshlands low and flat. The user asked for the same
+settings for all biomes, so the profiles became one shared `heightmap.profile`. Biome placement
+rules (coast, low, inland) still control where the regions sit.
+
 Design note: an earlier version added the noise to the falloff, `falloff + strength * (noise - 0.5)`.
 That version merged two landmasses in about one try of three, and the coast followed the circle.
 The multiplicative field with the channel gives 3 landmasses on the first try for every seed tested.
@@ -278,11 +282,10 @@ Sea is in `[-seabed_depth, 0]`.
 |---|---|---|
 | 4a | `04a_signed_coast_distance.png` | Distance to the coast. Land is positive. Sea is negative. |
 | 4b | `04b_coast_curve.png` | The distance is blurred with a Gaussian of `coast_blur_px` first, so the curve has no creases on the medial axis. `curve = smoothstep(clamp(blurred_distance / coast_distance_px, 0, 1))` on land, 0 on sea. |
-| 4c | `04c_profile_base.png`, `04c_profile_amplitude.png` | Weight maps: one-hot biome masks, blurred with a Gaussian of `profile_blur_px`, normalized to sum 1 on land. `base_map = sum(w_b * base_b)`. `amplitude_map = sum(w_b * amplitude_b)`. |
-| 4d | `04d_biome_noise.png` | One noise field per biome type from its profile. Ridged where `ridged` is true. `noise_map = sum(w_b * noise_b)`. |
-| 4e | `04e_land_height.png` | `land = clamp(curve * (base_map + amplitude_map * (2 * noise_map - 1)), 0, 1)`. The whole sum is multiplied by `curve`, so the coast stays at 0. |
-| 4f | `04f_seabed.png` | `seabed = -seabed_depth * smoothstep(clamp(-distance / seabed_distance_px, 0, 1))`. The seabed is then blended to `-seabed_depth` with `(1 - edge_band)` outside the band, blurred with a Gaussian of `seabed_blur_px` to remove creases, and blended with the edge band again, so the circle edge and the outside of the circle sit exactly at the floor. |
-| 4g | `04g_height.png` | `height = land` where land, `seabed` where sea. The image maps `[-seabed_depth, 1]` to `[0, 255]`. |
+| 4c | `04c_height_noise.png` | One noise field for all biomes from `heightmap.profile`. Ridged where `ridged` is true. |
+| 4d | `04d_land_height.png` | `land = clamp(curve * (base + amplitude * (2 * noise - 1)), 0, 1)`. The whole sum is multiplied by `curve`, so the coast stays at 0. |
+| 4e | `04e_seabed.png` | `seabed = -seabed_depth * smoothstep(clamp(-distance / seabed_distance_px, 0, 1))`. The seabed is then blended to `-seabed_depth` with `(1 - edge_band)` outside the band, blurred with a Gaussian of `seabed_blur_px` to remove creases, and blended with the edge band again, so the circle edge and the outside of the circle sit exactly at the floor. |
+| 4f | `04f_height.png` | `height = land` where land, `seabed` where sea. The image maps `[-seabed_depth, 1]` to `[0, 255]`. |
 
 ## 12. Stage 5: Unreal export (`export.py`)
 
@@ -334,7 +337,7 @@ Tests use pytest and a small size (127 or 253) for speed, except where the size 
 | `test_circle.py` | Mask width along the center row is within 1 pixel of `size * diameter_pct / 100`. Edge band is 1 inside and 0 at the edge. |
 | `test_landmass.py` | Exactly 3 connected areas. All land is inside the circle. IDs are 1..3. No lakes below `min_lake_area_px`. `GenerationError` is raised with an impossible config. |
 | `test_biomes.py` | Every biome type appears on every landmass. Every sub-type 1..15 appears. Every `coast` region touches the coast band. `region_ids` is 0 exactly on sea. |
-| `test_heightmap.py` | Land height is in `[0, 1]`. Sea height is in `[-seabed_depth, 0]`. Coast pixels are near 0. Mean height of mountain pixels is higher than mean height of marsh pixels. |
+| `test_heightmap.py` | Land height is in `[0, 1]`. Sea height is in `[-seabed_depth, 0]`. Coast pixels are near 0. All biomes share the profile: inland mean heights per biome are close. A higher base gives higher land. |
 | `test_export.py` | Heightmap is `uint16`, shape `(size, size)`, sea pixels are 32768. Weight maps sum to 255 (+/- 1) at each pixel. 21 PNG files plus `params.json` exist. |
 | `test_pipeline.py` | Two runs with the same seed give identical bytes for every output file. `--debug` writes 20+ step images and `walkthrough.md`. |
 

@@ -14,7 +14,7 @@ from terrain.config import Config, config_from_dict, config_to_dict
 from terrain.debug import StepRecord
 from terrain.pipeline import run_pipeline
 
-PROFILE_FIELDS = ("base", "amplitude")
+PROFILE_FIELDS = ("base", "amplitude", "frequency", "octaves", "ridged")
 
 
 @dataclass
@@ -55,9 +55,10 @@ def build_overrides(values: dict) -> dict:
         "biome_warp_px": ("biomes", "warp", "strength_px"),
         "coast_band_px": ("biomes", "coast_band_px"),
         "coast_distance_px": ("heightmap", "coast_distance_px"),
-        "profile_blur_px": ("heightmap", "profile_blur_px"),
         "seabed_depth": ("heightmap", "seabed_depth"),
     }
+    for field_name in PROFILE_FIELDS:
+        simple[f"profile_{field_name}"] = ("heightmap", "profile", field_name)
     for key, path in simple.items():
         if key in v:
             put(path, v[key])
@@ -65,15 +66,6 @@ def build_overrides(values: dict) -> dict:
         put(("landmass", "radius_pct"), [v["radius_min"], v["radius_max"]])
     if "seeds_min" in v and "seeds_max" in v:
         put(("biomes", "seeds_per_landmass"), [v["seeds_min"], v["seeds_max"]])
-    for key, value in v.items():
-        if not key.startswith("profile_"):
-            continue
-        body = key[len("profile_"):]  # <biome name>_<field>, the name can contain underscores
-        for field_name in PROFILE_FIELDS:
-            if body.endswith("_" + field_name):
-                name = body[: -len(field_name) - 1]
-                put(("heightmap", "profiles", name, field_name), value)
-                break
     return out
 
 
