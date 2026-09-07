@@ -1,0 +1,57 @@
+# Default parameters of the terrain generator.
+# Command line flags override these values.
+
+seed: 42
+size: 1009                  # one of 127, 253, 505, 1009, 2017, 4033, 8129
+
+circle:
+  diameter_pct: 90          # circle diameter as % of the image width
+  edge_band_pct: 10         # soft band inside the circle edge, as % of the radius
+
+landmass:
+  count: 3
+  seed_area_pct: 50         # seed points lie inside this % of the circle radius
+  min_separation_pct: 70    # minimum distance between seed points, as % of the radius
+  radius_pct: [45, 55]      # landmass radius, random in this range, as % of the circle radius
+  noise:
+    octaves: 6
+    frequency: 3.0          # cycles across the image width, first octave
+    lacunarity: 2.0
+    persistence: 0.5
+  noise_strength: 0.45      # how far the noise moves the coast
+  threshold: 0.4            # falloff + noise above this value is land
+  min_lake_area_px: 200     # lakes and islands smaller than this are removed
+  max_retries: 10           # tries with the next seed when the count is wrong
+
+biomes:
+  seeds_per_landmass: [5, 7]
+  min_seed_separation_px: 60
+  coast_band_px: 40         # "coast" seeds lie within this distance from the coast
+  inland_fraction: 0.7      # "inland" seeds lie beyond this fraction of the max coast distance
+  max_retries: 10
+  warp:
+    strength_px: 60
+    frequency: 4.0
+    octaves: 4
+  types:
+    - {name: sea_side,         label: "Sea Side (Neringa)", placement: coast}
+    - {name: marshlands,       label: "Marshlands",         placement: low}
+    - {name: ancient_grove,    label: "Ancient Grove",      placement: any}
+    - {name: enchanted_forest, label: "Enchanted Forest",   placement: any}
+    - {name: mountain_range,   label: "Mountain Range",     placement: inland}
+
+heightmap:
+  coast_distance_px: 120    # distance from the coast where the base curve reaches 1
+  profile_blur_px: 25       # blur of the biome profile maps
+  profiles:                 # heights are fractions of the land range 0..1
+    sea_side:         {base: 0.05, amplitude: 0.04, frequency: 12.0, octaves: 3, ridged: false}
+    marshlands:       {base: 0.03, amplitude: 0.01, frequency:  6.0, octaves: 2, ridged: false}
+    ancient_grove:    {base: 0.25, amplitude: 0.12, frequency:  5.0, octaves: 5, ridged: false}
+    enchanted_forest: {base: 0.30, amplitude: 0.15, frequency:  6.0, octaves: 5, ridged: false}
+    mountain_range:   {base: 0.60, amplitude: 0.40, frequency:  4.0, octaves: 6, ridged: true}
+  seabed_depth: 0.30        # seabed floor as a fraction of the range below sea level
+  seabed_distance_px: 150   # distance from the coast where the seabed reaches its floor
+
+export:
+  sea_level_value: 32768
+  weight_blur_px: 12
