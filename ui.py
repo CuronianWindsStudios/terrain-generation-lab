@@ -6,8 +6,9 @@ from pathlib import Path
 
 import streamlit as st
 
-from terrain.config import Config, GenerationError, UNREAL_SIZES
+from terrain.config import SUBTYPE_LETTERS, Config, GenerationError, UNREAL_SIZES
 from terrain.experiment import build_overrides, generate, save_result
+from terrain.export import SEA_COLOR, biome_color
 
 WORK_DIR = Path("out") / "ui"
 DEFAULTS = Config()
@@ -27,6 +28,27 @@ def set_seed(seed: int) -> None:
 
 def random_seed() -> None:
     set_seed(random.randint(0, 999_999))
+
+
+def swatch(rgb: tuple[int, int, int], label: str) -> str:
+    r, g, b = rgb
+    return (
+        f'<span style="display:inline-block;width:14px;height:14px;border-radius:3px;'
+        f'background:rgb({r},{g},{b});vertical-align:middle;margin-right:6px;'
+        f'border:1px solid rgba(0,0,0,0.25)"></span>{label}'
+    )
+
+
+def legend_html(cfg: Config, subtypes: bool) -> str:
+    """One row per biome type. With sub-types, the row shows the A, B, and C swatches."""
+    rows = [f"<div>{swatch(SEA_COLOR, 'Sea')}</div>"]
+    for i, t in enumerate(cfg.biomes.types):
+        if subtypes:
+            parts = [swatch(biome_color(i, s), letter) for s, letter in enumerate(SUBTYPE_LETTERS)]
+            rows.append(f"<div><b>{t.label}</b>: " + " &nbsp; ".join(parts) + "</div>")
+        else:
+            rows.append(f"<div>{swatch(biome_color(i), t.label)}</div>")
+    return '<div style="line-height:1.9">' + "".join(rows) + "</div>"
 
 
 # ---------------------------------------------------------------- sidebar
@@ -115,8 +137,14 @@ if result is not None:
         f"Seed {cfg.seed}, size {cfg.size}, diameter {cfg.circle.diameter_pct:g} %, "
         f"{result.seconds:.1f} s, retries {retries}. Files in `{result.out_dir}`."
     )
+    show_subtypes = st.toggle("Show sub-types A, B, C", value=True,
+                              help="Off: one color per biome type, whatever the sub-type.")
     c1, c2, c3 = st.columns(3)
-    c1.image(str(result.biomes_color), caption="Biomes and sub-types", width="stretch")
+    if show_subtypes:
+        c1.image(str(result.biomes_color), caption="Biomes and sub-types", width="stretch")
+    else:
+        c1.image(str(result.biomes_type_color), caption="Biome types", width="stretch")
+    c1.markdown(legend_html(cfg, show_subtypes), unsafe_allow_html=True)
     c2.image(str(result.height_shaded), caption="Hill shade", width="stretch")
     c3.image(str(result.heightmap), caption="Heightmap, 8-bit preview of the 16-bit file", width="stretch")
 
@@ -134,6 +162,7 @@ if result is not None:
 # ---------------------------------------------------------------- seed browser
 with st.expander("Seed browser"):
     st.write("Generates 6 seeds at size 253 with the current parameters.")
+    st.toggle("Show sub-types in thumbnails", value=True, key="browse_subtypes")
     start = st.number_input("Start seed", min_value=0, max_value=999_999, value=int(st.session_state.seed))
     if st.button("Browse 6 seeds"):
         st.session_state.browse = [int(start) + i for i in range(6)]
@@ -145,7 +174,8 @@ with st.expander("Seed browser"):
             small["size"] = 253
             try:
                 r = cached_generate(small, False)
-                col.image(str(r.biomes_color), caption=f"Seed {s}", width="stretch")
+                thumb = r.biomes_color if st.session_state.get("browse_subtypes", True) else r.biomes_type_color
+                col.image(str(thumb), caption=f"Seed {s}", width="stretch")
             except GenerationError as exc:
                 col.error(f"Seed {s}: {exc}")
             col.button("Use this seed", key=f"use_{s}", on_click=set_seed, args=(s,))

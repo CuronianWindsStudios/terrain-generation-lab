@@ -76,4 +76,15 @@ def test_export_files(tmp_path):
     assert params["seed"] == 42
     assert params["unreal_import"]["resolution"] == SIZE
     previews = write_previews(cfg, biomes, height, tmp_path / "preview")
-    assert sorted(p.name for p in previews) == ["biomes_color.png", "height_shaded.png", "heightmap_8bit.png"]
+    assert sorted(p.name for p in previews) == [
+        "biomes_color.png", "biomes_type_color.png", "height_shaded.png", "heightmap_8bit.png",
+    ]
+    type_map = load_array(tmp_path / "preview" / "biomes_type_color.png")
+    sub_map = load_array(tmp_path / "preview" / "biomes_color.png")
+    assert type_map.shape == sub_map.shape == (SIZE, SIZE, 3)
+    # Without sub-types, one biome has one color: the A, B, and C regions look the same.
+    for sid_a, sid_b in ((1, 2), (13, 15)):
+        a = type_map[biomes.subtype_ids == sid_a]
+        b = type_map[biomes.subtype_ids == sid_b]
+        assert abs(int(a.mean()) - int(b.mean())) < 25
+    assert not np.array_equal(type_map, sub_map)

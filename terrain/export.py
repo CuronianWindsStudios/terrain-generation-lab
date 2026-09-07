@@ -143,15 +143,32 @@ def write_previews(cfg: Config, biomes: BiomeResult, height: HeightResult,
     height8 = (encode_height16(h, cfg.export.sea_level_value) >> 8).astype(np.uint8)
     files.append(save_gray8(out / "heightmap_8bit.png", height8))
 
+    files.append(save_rgb(out / "biomes_color.png", biome_color_image(cfg, biomes, shade, subtypes=True)))
+    files.append(save_rgb(out / "biomes_type_color.png", biome_color_image(cfg, biomes, shade, subtypes=False)))
+    return files
+
+
+def biome_color(biome_index: int, subtype_index: int | None = None) -> tuple[int, int, int]:
+    """The preview color of a biome type, or of one of its sub-types."""
+    base = np.array(PALETTE[biome_index % len(PALETTE)], dtype=np.float32)
+    if subtype_index is not None:
+        base = base * SUBTYPE_LIGHTNESS[subtype_index]
+    return tuple(int(v) for v in np.clip(base, 0, 255))
+
+
+def biome_color_image(cfg: Config, biomes: BiomeResult, shade: np.ndarray, subtypes: bool) -> np.ndarray:
+    """RGB map of the biomes. With subtypes, each sub-type A, B, C gets its own lightness."""
+    size = biomes.biome_ids.shape[0]
     rgb = np.zeros((size, size, 3), dtype=np.float32)
     rgb[...] = SEA_COLOR
     n_sub = len(SUBTYPE_LETTERS)
     for i in range(len(cfg.biomes.types)):
-        for s in range(n_sub):
-            sid = i * n_sub + s + 1
-            color = np.array(PALETTE[i % len(PALETTE)], dtype=np.float32) * SUBTYPE_LIGHTNESS[s]
-            rgb[biomes.subtype_ids == sid] = np.clip(color, 0, 255)
+        if subtypes:
+            for s in range(n_sub):
+                sid = i * n_sub + s + 1
+                rgb[biomes.subtype_ids == sid] = biome_color(i, s)
+        else:
+            rgb[biomes.biome_ids == i + 1] = biome_color(i)
     land = biomes.biome_ids > 0
     rgb[land] = rgb[land] * (0.6 + 0.4 * shade[land][:, None])
-    files.append(save_rgb(out / "biomes_color.png", np.clip(rgb, 0, 255).astype(np.uint8)))
-    return files
+    return np.clip(rgb, 0, 255).astype(np.uint8)

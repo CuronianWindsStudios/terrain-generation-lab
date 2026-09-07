@@ -23,6 +23,7 @@ class ExperimentResult:
     out_dir: Path
     steps: list[StepRecord]
     biomes_color: Path
+    biomes_type_color: Path
     height_shaded: Path
     heightmap: Path
     seconds: float
@@ -93,6 +94,7 @@ def generate(overrides: dict, work_dir: str | Path, debug: bool = True) -> Exper
         out_dir=out,
         steps=result.steps,
         biomes_color=out / "preview" / "biomes_color.png",
+        biomes_type_color=out / "preview" / "biomes_type_color.png",
         height_shaded=out / "preview" / "height_shaded.png",
         heightmap=out / "preview" / "heightmap_8bit.png",
         seconds=seconds,

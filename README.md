@@ -49,6 +49,7 @@ run that config later with `python -m terrain --config <folder>/config.yaml`.
 - `out/unreal/params.json`: the seed, the parameters, the region list, and the Unreal import settings.
 - `out/preview/height_shaded.png`: a hill shade of the heightmap, for people.
 - `out/preview/biomes_color.png`: a color map of the 15 sub-types, for people.
+- `out/preview/biomes_type_color.png`: the same map with one color per biome type.
 - `out/preview/heightmap_8bit.png`: an 8-bit copy of the heightmap, for image viewers.
 - `out/steps/` and `out/walkthrough.md`: one image per sub-step, with `--debug`.
 

@@ -95,6 +95,7 @@ out/
   preview/
     height_shaded.png             8-bit hill shade for people
     biomes_color.png              RGB, one color per sub-type, for people
+    biomes_type_color.png         RGB, one color per biome type, for people
     heightmap_8bit.png            8-bit copy of the heightmap, for image viewers and the UI
   steps/                          only with --debug
     01a_center_distance.png
