@@ -8,10 +8,10 @@ from scipy import ndimage
 
 from terrain.biomes import BiomeResult
 from terrain.circle import CircleResult
-from terrain.config import HeightmapConfig
+from terrain.config import HeightmapConfig, Profile
 from terrain.debug import StepRecorder
 from terrain.landmass import LandResult
-from terrain.noise import fractal_noise, ridged_noise, smoothstep
+from terrain.noise import NOISE_GENERATORS, smoothstep
 
 STAGE = 4
 
@@ -21,11 +21,30 @@ class HeightResult:
     height: np.ndarray
 
 
+def biome_noise(profile: Profile, size: int, seed: int, biome_index: int) -> np.ndarray:
+    """The noise field of one biome type at the map size. Each biome has its own random stream."""
+    rng = np.random.default_rng([seed, STAGE, biome_index])
+    gen = NOISE_GENERATORS[profile.noise]
+    return gen((size, size), profile.octaves, profile.frequency, profile.lacunarity, profile.persistence, rng)
+
+
+def biome_weights(biome_ids: np.ndarray, blend_px: list[float]) -> np.ndarray:
+    """One blurred mask per biome type, each with its own blur. Normalized to sum 1 where the sum is positive."""
+    masks = [
+        ndimage.gaussian_filter((biome_ids == i + 1).astype(np.float32), sigma=blur)
+        for i, blur in enumerate(blend_px)
+    ]
+    blurred = np.stack(masks)
+    total = blurred.sum(axis=0, keepdims=True)
+    return (blurred / np.maximum(total, 1e-6)).astype(np.float32)
+
+
 def make_heightmap(circle: CircleResult, land: LandResult, biomes: BiomeResult,
                    cfg: HeightmapConfig, seed: int, recorder: StepRecorder) -> HeightResult:
     size = land.land_mask.shape[0]
     land_mask = land.land_mask
-    profile = cfg.profile
+    names = biomes.type_names
+    profiles = [cfg.profiles[n] for n in names]
 
     sea_distance = ndimage.distance_transform_edt(~land_mask).astype(np.float32)
     signed = np.where(land_mask, biomes.coast_distance, -sea_distance).astype(np.float32)
@@ -45,23 +64,42 @@ def make_heightmap(circle: CircleResult, land: LandResult, biomes: BiomeResult,
         {"coast_distance_px": cfg.coast_distance_px, "coast_blur_px": cfg.coast_blur_px},
     )
 
-    rng = np.random.default_rng([seed, STAGE, 0])
-    gen = ridged_noise if profile.ridged else fractal_noise
-    noise = gen((size, size), profile.octaves, profile.frequency, 2.0, 0.5, rng)
+    weights = biome_weights(biomes.biome_ids, [p.blend_px for p in profiles])
+    base_map = np.zeros((size, size), dtype=np.float32)
+    amp_map = np.zeros((size, size), dtype=np.float32)
+    noise_map = np.zeros((size, size), dtype=np.float32)
+    for i, p in enumerate(profiles):
+        base_map += weights[i] * p.base
+        amp_map += weights[i] * p.amplitude
+        noise_map += weights[i] * biome_noise(p, size, seed, i)
     recorder.step(
-        "04c", "Height noise", noise,
-        "One noise field for all biomes. Ridged noise gives sharp crests. Fractal noise gives "
-        "rolling hills. All biomes share the same height profile.",
-        {"frequency": profile.frequency, "octaves": profile.octaves, "ridged": profile.ridged},
+        "04c", "Profile base", base_map,
+        "Each biome type has its own height profile. The base is the lowest height of the biome. "
+        "A base below 0 makes pools below the sea level. The generator blurs each biome mask with "
+        "the blend_px of that biome and mixes the profiles, so the height changes smoothly at "
+        "biome borders. This image is the mixed base height.",
+        {"base": {n: p.base for n, p in zip(names, profiles)},
+         "blend_px": {n: p.blend_px for n, p in zip(names, profiles)}},
+    )
+    recorder.step(
+        "04c-2", "Profile amplitude", amp_map,
+        "The mixed noise amplitude of the biome profiles. The amplitude is the height of the "
+        "hills above the base.",
+        {"amplitude": {n: p.amplitude for n, p in zip(names, profiles)}},
+    )
+    recorder.step(
+        "04d", "Biome noise", noise_map,
+        "One noise field per biome type, mixed with the same weights. Ridged noise gives sharp "
+        "crests. Billow noise gives round bulges. Fractal noise gives rolling hills.",
+        {n: f"{p.noise}, frequency {p.frequency}, octaves {p.octaves}, "
+            f"lacunarity {p.lacunarity}, persistence {p.persistence}" for n, p in zip(names, profiles)},
     )
 
-    land_height = np.clip(curve * (profile.base + profile.amplitude * (2.0 * noise - 1.0)), 0.0, 1.0)
-    land_height = land_height.astype(np.float32)
+    land_height = np.clip(curve * (base_map + amp_map * noise_map), -1.0, 1.0).astype(np.float32)
     recorder.step(
-        "04d", "Land height", land_height,
-        "land = clamp(curve * (base + amplitude * (2 * noise - 1)), 0, 1). "
-        "The curve multiplies the whole sum, so the coast stays at 0.",
-        {"base": profile.base, "amplitude": profile.amplitude},
+        "04e", "Land height", land_height,
+        "land = clamp(curve * (base + amplitude * noise), -1, 1). The noise is in [0, 1], so the "
+        "hills go up from the base. The curve multiplies the whole sum, so the coast stays at 0.",
     )
 
     depth = cfg.seabed_depth
@@ -71,7 +109,7 @@ def make_heightmap(circle: CircleResult, land: LandResult, biomes: BiomeResult,
     seabed = seabed * circle.edge_band + (-depth) * (1.0 - circle.edge_band)
     seabed = np.minimum(seabed, 0.0).astype(np.float32)
     recorder.step(
-        "04e", "Seabed", seabed,
+        "04f", "Seabed", seabed,
         "The seabed goes down from 0 at the coast to the floor at seabed_distance_px. "
         "The edge band blends the seabed to the floor at the circle edge and outside the circle. "
         "A blur removes the creases between the landmasses.",
@@ -81,7 +119,7 @@ def make_heightmap(circle: CircleResult, land: LandResult, biomes: BiomeResult,
 
     height = np.where(land_mask, land_height, seabed).astype(np.float32)
     recorder.step(
-        "04f", "Height", height,
+        "04g", "Height", height,
         "The land height and the seabed together. The image maps the floor to black and the highest "
         "point to white. Sea level is a mid gray.",
         {"min": round(float(height.min()), 3), "max": round(float(height.max()), 3)},

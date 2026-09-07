@@ -6,11 +6,12 @@ from pathlib import Path
 
 import streamlit as st
 
-from terrain.config import SUBTYPE_LETTERS, Config, GenerationError, UNREAL_SIZES
-from terrain.experiment import build_overrides, generate, save_result
+from terrain.config import NOISE_TYPES, SUBTYPE_LETTERS, Config, GenerationError, Profile, UNREAL_SIZES
+from terrain.experiment import PROFILE_FIELDS, build_overrides, generate, profile_preview, save_result
 from terrain.export import SEA_COLOR, biome_color
 
 WORK_DIR = Path("out") / "ui"
+PREVIEW_PX = 200
 DEFAULTS = Config()
 SIZES = [s for s in UNREAL_SIZES if s <= 2017]
 
@@ -51,6 +52,12 @@ def legend_html(cfg: Config, subtypes: bool) -> str:
     return '<div style="line-height:1.9">' + "".join(rows) + "</div>"
 
 
+@st.cache_data(show_spinner=False)
+def cached_preview(size: int, seed: int, biome_index: int, **fields):
+    """A true-scale crop of the biome height at the map center, as a hill shade."""
+    return profile_preview(Profile(**fields), size, seed, biome_index, PREVIEW_PX)
+
+
 # ---------------------------------------------------------------- sidebar
 with st.sidebar:
     st.title("Terrain experiments")
@@ -84,16 +91,42 @@ with st.sidebar:
         hm = DEFAULTS.heightmap
         coast_distance_px = st.slider("Coast rise distance px", 10.0, 300.0, hm.coast_distance_px, 10.0)
         seabed_depth = st.slider("Seabed depth", 0.05, 1.0, hm.seabed_depth, 0.05)
-        st.caption("Height profile, shared by all biomes")
-        p = hm.profile
-        profile_values = {
-            "profile_base": st.slider("Base height", 0.0, 1.0, p.base, 0.01,
-                                      help="Height of the land plateau, as a fraction of the range."),
-            "profile_amplitude": st.slider("Hill amplitude", 0.0, 1.0, p.amplitude, 0.01),
-            "profile_frequency": st.slider("Hill frequency", 1.0, 16.0, p.frequency, 0.5),
-            "profile_octaves": int(st.slider("Hill octaves", 1, 9, p.octaves, 1)),
-            "profile_ridged": st.toggle("Ridged crests", value=p.ridged),
-        }
+
+    st.caption("Height profile of each biome")
+    profile_values = {}
+    for i, t in enumerate(bi.types):
+        p = hm.profiles[t.name]
+        k = f"profile_{t.name}_"
+        with st.expander(t.label):
+            thumbnail = st.empty()
+            profile_values[k + "base"] = st.slider(
+                "Base height", -0.3, 1.0, p.base, 0.01, key=k + "base",
+                help="Lowest height of the biome. Below 0 is under the sea level, so pools form.")
+            profile_values[k + "amplitude"] = st.slider(
+                "Hill amplitude", 0.0, 1.0, p.amplitude, 0.01, key=k + "amplitude",
+                help="Height of the hills above the base.")
+            profile_values[k + "noise"] = st.selectbox(
+                "Noise type", NOISE_TYPES, index=NOISE_TYPES.index(p.noise), key=k + "noise",
+                help="fractal: rolling hills. ridged: sharp crests. billow: round bulges.")
+            profile_values[k + "frequency"] = st.slider(
+                "Frequency", 1.0, 16.0, p.frequency, 0.5, key=k + "frequency")
+            profile_values[k + "octaves"] = int(st.slider(
+                "Octaves", 1, 9, p.octaves, 1, key=k + "octaves"))
+            profile_values[k + "lacunarity"] = st.slider(
+                "Lacunarity", 1.5, 4.0, p.lacunarity, 0.1, key=k + "lacunarity",
+                help="Frequency multiplier of each next octave.")
+            profile_values[k + "persistence"] = st.slider(
+                "Persistence", 0.1, 1.0, p.persistence, 0.05, key=k + "persistence",
+                help="Amplitude multiplier of each next octave.")
+            profile_values[k + "blend_px"] = st.slider(
+                "Blend px", 1.0, 80.0, p.blend_px, 1.0, key=k + "blend_px",
+                help="Blur of this biome at its border.")
+            fields = {f: profile_values[k + f] for f in PROFILE_FIELDS}
+            thumbnail.image(
+                cached_preview(int(size), int(st.session_state.seed), i, **fields),
+                caption=f"{PREVIEW_PX} px at the map center, true scale. Blue is below sea level.",
+                width="stretch",
+            )
 
     debug = st.checkbox("Record sub-steps", value=True)
     run = st.button("Generate", type="primary", width="stretch")

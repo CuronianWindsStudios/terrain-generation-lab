@@ -14,7 +14,11 @@ def test_defaults_are_valid():
     assert cfg.size == 1009
     assert cfg.landmass.count == 3
     assert len(cfg.biomes.types) == 5
-    assert cfg.heightmap.profile.ridged is False
+    assert set(cfg.heightmap.profiles) == {t.name for t in cfg.biomes.types}
+    assert cfg.heightmap.profiles["mountain_range"].noise == "ridged"
+    assert cfg.heightmap.profiles["marshlands"].noise == "fractal"
+    assert cfg.heightmap.profiles["marshlands"].base < 0
+    assert not hasattr(cfg.heightmap.profiles["marshlands"], "floor")
 
 
 def test_override_merges_nested_values():
@@ -36,9 +40,36 @@ def test_bad_placement_raises():
         config_from_dict({"biomes": {"types": types}})
 
 
-def test_bad_profile_raises():
+def test_bad_profile_octaves_raises():
     with pytest.raises(ConfigError, match="octaves"):
-        config_from_dict({"heightmap": {"profile": {"octaves": 0}}})
+        config_from_dict({"heightmap": {"profiles": {"marshlands": {"octaves": 0}}}})
+
+
+def test_bad_profile_noise_type_raises():
+    with pytest.raises(ConfigError, match="noise"):
+        config_from_dict({"heightmap": {"profiles": {"marshlands": {"noise": "spiky"}}}})
+
+
+def test_bad_profile_blend_raises():
+    with pytest.raises(ConfigError, match="blend_px"):
+        config_from_dict({"heightmap": {"profiles": {"marshlands": {"blend_px": 0}}}})
+
+
+def test_bad_profile_base_raises():
+    with pytest.raises(ConfigError, match="base"):
+        config_from_dict({"heightmap": {"profiles": {"marshlands": {"base": 1.5}}}})
+
+
+def test_bad_profile_amplitude_raises():
+    with pytest.raises(ConfigError, match="amplitude"):
+        config_from_dict({"heightmap": {"profiles": {"marshlands": {"amplitude": -0.1}}}})
+
+
+def test_missing_profile_raises():
+    types = config_to_dict(Config())["biomes"]["types"]
+    types[0]["name"] = "dunes"
+    with pytest.raises(ConfigError, match="dunes"):
+        config_from_dict({"biomes": {"types": types}})
 
 
 def test_load_yaml_and_cli_override(tmp_path):

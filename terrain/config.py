@@ -10,6 +10,7 @@ import yaml
 UNREAL_SIZES = (127, 253, 505, 1009, 2017, 4033, 8129)
 PLACEMENTS = ("coast", "low", "inland", "any")
 SUBTYPE_LETTERS = ("A", "B", "C")
+NOISE_TYPES = ("fractal", "ridged", "billow")
 
 
 class ConfigError(ValueError):
@@ -85,18 +86,32 @@ class BiomesConfig:
 
 @dataclass
 class Profile:
+    """The height profile of one biome type. height = base + amplitude * noise, noise in [0, 1]."""
     base: float
     amplitude: float
     frequency: float
     octaves: int
-    ridged: bool = False
+    lacunarity: float = 2.0
+    persistence: float = 0.5
+    noise: str = "fractal"
+    blend_px: float = 25.0
+
+
+def default_profiles() -> dict[str, Profile]:
+    return {
+        "sea_side": Profile(0.01, 0.08, 12.0, 3),
+        "marshlands": Profile(-0.03, 0.12, 6.0, 2),
+        "ancient_grove": Profile(0.13, 0.24, 5.0, 5),
+        "enchanted_forest": Profile(0.15, 0.30, 6.0, 5),
+        "mountain_range": Profile(0.20, 0.80, 8.0, 6, noise="ridged"),
+    }
 
 
 @dataclass
 class HeightmapConfig:
     coast_distance_px: float = 80.0
     coast_blur_px: float = 12.0
-    profile: Profile = field(default_factory=lambda: Profile(0.30, 0.15, 6.0, 5, ridged=False))
+    profiles: dict[str, Profile] = field(default_factory=default_profiles)
     seabed_depth: float = 0.3
     seabed_distance_px: float = 150.0
     seabed_blur_px: float = 10.0
@@ -166,7 +181,7 @@ def config_from_dict(data: dict) -> Config:
         heightmap=HeightmapConfig(
             coast_distance_px=float(hm["coast_distance_px"]),
             coast_blur_px=float(hm["coast_blur_px"]),
-            profile=Profile(**hm["profile"]),
+            profiles={k: Profile(**v) for k, v in hm["profiles"].items()},
             seabed_depth=float(hm["seabed_depth"]),
             seabed_distance_px=float(hm["seabed_distance_px"]),
             seabed_blur_px=float(hm["seabed_blur_px"]),
@@ -190,13 +205,29 @@ def validate(cfg: Config) -> None:
     for t in cfg.biomes.types:
         if t.placement not in PLACEMENTS:
             raise ConfigError(f"placement of biome {t.name} must be one of {PLACEMENTS}. Got {t.placement}.")
+        if t.name not in cfg.heightmap.profiles:
+            raise ConfigError(f"heightmap.profiles has no entry for biome {t.name}.")
     lo, hi = cfg.biomes.seeds_per_landmass
     if lo < len(cfg.biomes.types) or hi < lo:
         raise ConfigError(
             f"biomes.seeds_per_landmass must be [lo, hi] with lo >= 5 and hi >= lo. Got {lo}, {hi}."
         )
-    if cfg.heightmap.profile.octaves < 1:
-        raise ConfigError(f"heightmap.profile.octaves must be >= 1. Got {cfg.heightmap.profile.octaves}.")
+    for name, p in cfg.heightmap.profiles.items():
+        prefix = f"heightmap.profiles.{name}"
+        if not -1 <= p.base <= 1:
+            raise ConfigError(f"{prefix}.base must be in [-1, 1]. Got {p.base}.")
+        if p.amplitude < 0:
+            raise ConfigError(f"{prefix}.amplitude must be >= 0. Got {p.amplitude}.")
+        if p.octaves < 1:
+            raise ConfigError(f"{prefix}.octaves must be >= 1. Got {p.octaves}.")
+        if p.noise not in NOISE_TYPES:
+            raise ConfigError(f"{prefix}.noise must be one of {NOISE_TYPES}. Got {p.noise}.")
+        if p.blend_px <= 0:
+            raise ConfigError(f"{prefix}.blend_px must be > 0. Got {p.blend_px}.")
+        if p.lacunarity <= 0:
+            raise ConfigError(f"{prefix}.lacunarity must be > 0. Got {p.lacunarity}.")
+        if not 0 < p.persistence <= 1:
+            raise ConfigError(f"{prefix}.persistence must be in (0, 1]. Got {p.persistence}.")
     if not 0 < cfg.heightmap.seabed_depth <= 1:
         raise ConfigError(f"heightmap.seabed_depth must be in (0, 1]. Got {cfg.heightmap.seabed_depth}.")
 

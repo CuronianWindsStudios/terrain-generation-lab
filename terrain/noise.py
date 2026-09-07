@@ -1,4 +1,4 @@
-"""Value noise, fractal noise, and ridged noise in numpy."""
+"""Value noise, fractal noise, ridged noise, and billow noise in numpy."""
 from __future__ import annotations
 
 import numpy as np
@@ -52,3 +52,18 @@ def ridged_noise(shape, octaves, frequency, lacunarity, persistence, rng) -> np.
         shape, octaves, frequency, lacunarity, persistence, rng,
         lambda v: 1.0 - np.abs(2.0 * v - 1.0),
     )
+
+
+def billow_noise(shape, octaves, frequency, lacunarity, persistence, rng) -> np.ndarray:
+    """Sum of billow octaves, |2n - 1|. Makes round bulges. Returns float32 in [0, 1]."""
+    return _octaves(
+        shape, octaves, frequency, lacunarity, persistence, rng,
+        lambda v: np.abs(2.0 * v - 1.0),
+    )
+
+
+NOISE_GENERATORS = {
+    "fractal": fractal_noise,
+    "ridged": ridged_noise,
+    "billow": billow_noise,
+}

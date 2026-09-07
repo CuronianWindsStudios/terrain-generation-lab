@@ -1,6 +1,6 @@
 import numpy as np
 
-from terrain.noise import fractal_noise, ridged_noise, smoothstep, value_noise
+from terrain.noise import billow_noise, fractal_noise, ridged_noise, smoothstep, value_noise
 
 
 def test_smoothstep_ends():
@@ -28,3 +28,10 @@ def test_fractal_noise_range_and_determinism():
 def test_ridged_noise_range():
     n = ridged_noise((64, 64), 4, 4.0, 2.0, 0.5, np.random.default_rng(5))
     assert n.min() >= 0.0 and n.max() <= 1.0
+
+
+def test_billow_noise_is_the_inverse_of_ridged():
+    r = ridged_noise((64, 64), 4, 4.0, 2.0, 0.5, np.random.default_rng(5))
+    b = billow_noise((64, 64), 4, 4.0, 2.0, 0.5, np.random.default_rng(5))
+    assert b.min() >= 0.0 and b.max() <= 1.0
+    assert np.allclose(r + b, 1.0, atol=1e-5)

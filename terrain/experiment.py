@@ -8,13 +8,16 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+import numpy as np
 import yaml
 
-from terrain.config import Config, config_from_dict, config_to_dict
+from terrain.config import Config, Profile, config_from_dict, config_to_dict
 from terrain.debug import StepRecord
+from terrain.export import hillshade
+from terrain.heightmap import biome_noise
 from terrain.pipeline import run_pipeline
 
-PROFILE_FIELDS = ("base", "amplitude", "frequency", "octaves", "ridged")
+PROFILE_FIELDS = ("base", "amplitude", "frequency", "octaves", "lacunarity", "persistence", "noise", "blend_px")
 
 
 @dataclass
@@ -57,8 +60,6 @@ def build_overrides(values: dict) -> dict:
         "coast_distance_px": ("heightmap", "coast_distance_px"),
         "seabed_depth": ("heightmap", "seabed_depth"),
     }
-    for field_name in PROFILE_FIELDS:
-        simple[f"profile_{field_name}"] = ("heightmap", "profile", field_name)
     for key, path in simple.items():
         if key in v:
             put(path, v[key])
@@ -66,6 +67,15 @@ def build_overrides(values: dict) -> dict:
         put(("landmass", "radius_pct"), [v["radius_min"], v["radius_max"]])
     if "seeds_min" in v and "seeds_max" in v:
         put(("biomes", "seeds_per_landmass"), [v["seeds_min"], v["seeds_max"]])
+    for key, value in v.items():
+        if not key.startswith("profile_"):
+            continue
+        body = key[len("profile_"):]  # <biome name>_<field>, the name can contain underscores
+        for field_name in PROFILE_FIELDS:
+            if body.endswith("_" + field_name):
+                name = body[: -len(field_name) - 1]
+                put(("heightmap", "profiles", name, field_name), value)
+                break
     return out
 
 
@@ -110,3 +120,28 @@ def save_result(result: ExperimentResult, target_dir: str | Path) -> list[Path]:
     cfg_path.write_text(yaml.safe_dump(config_to_dict(result.config), sort_keys=False), encoding="utf-8")
     written.append(cfg_path)
     return written
+
+
+def profile_height_crop(profile: Profile, size: int, seed: int, biome_index: int, crop_px: int) -> np.ndarray:
+    """The inland height of one biome, cropped at the center of the map.
+
+    The crop uses the same noise field as the real map, so the scale is true. The coast curve
+    is not applied. height = clamp(base + amplitude * noise, -1, 1).
+    """
+    noise = biome_noise(profile, size, seed, biome_index)
+    crop = min(crop_px, size)
+    start = (size - crop) // 2
+    window = noise[start:start + crop, start:start + crop]
+    height = profile.base + profile.amplitude * window
+    return np.clip(height, -1.0, 1.0).astype(np.float32)
+
+
+def profile_preview(profile: Profile, size: int, seed: int, biome_index: int, crop_px: int = 200) -> np.ndarray:
+    """An 8-bit RGB hill shade of profile_height_crop. Higher land is brighter. Water is blue."""
+    height = profile_height_crop(profile, size, seed, biome_index, crop_px)
+    shade = hillshade(height, z_factor=size / 12.0)
+    shaded = np.clip(0.65 * shade + 0.35 * np.clip(height, 0.0, 1.0), 0.0, 1.0)
+    rgb = np.repeat(shaded[..., None], 3, axis=2)
+    water = height < 0.0
+    rgb[water] = rgb[water] * np.array([0.35, 0.55, 0.9]) + np.array([0.0, 0.05, 0.1])
+    return np.round(np.clip(rgb, 0.0, 1.0) * 255.0).astype(np.uint8)

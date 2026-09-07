@@ -26,8 +26,11 @@ Sidebar:
 - Expander "Landmasses": threshold, channel_pct, warp_pct, noise frequency, noise octaves,
   radius_pct range, seed_area_pct, min_separation_pct.
 - Expander "Biomes": warp strength_px, seeds_per_landmass range, coast_band_px.
-- Expander "Heightmap": coast_distance_px, profile_blur_px, seabed_depth, and for each of
-  the 5 biome types the base and the amplitude.
+- Expander "Heightmap": coast_distance_px and seabed_depth.
+- One expander per biome type, at the root of the sidebar. At the top, a live thumbnail: a
+  true-scale crop of the biome height at the map center, as a hill shade, with water in blue.
+  Below it: base, amplitude, noise type, frequency, octaves, lacunarity, persistence, and
+  blend_px.
 - "Generate" button.
 
 Main area:

@@ -65,9 +65,12 @@ run that config later with `python -m terrain --config <folder>/config.yaml`.
    landmass get one biome type each. Sea Side seeds sit at the coast. Mountain Range seeds sit
    inland. Each land pixel goes to the nearest seed, with a noise warp for organic borders.
    Each biome type cycles its regions through the sub-types A, B, and C.
-4. **Heightmap.** The height rises from 0 at the coast with a smooth curve. One height profile
-   applies to all biomes: a base height, a noise amplitude, a noise frequency, and a ridged
-   flag. The seabed goes down to a floor at the circle edge.
+4. **Heightmap.** The height rises from 0 at the coast with a smooth curve. Each biome type has
+   its own height profile: a base height, a hill amplitude, the noise octaves, a noise type
+   (fractal, ridged, or billow), and a blend width at its border. The base is the lowest
+   height of the biome. The hills go up from the base. A base below 0 puts land under the sea
+   level, so pools form. The generator mixes the profiles with blurred biome masks. The seabed
+   goes down to a floor at the circle edge.
 5. **Export.** The generator writes the 16-bit heightmap, the weight maps, and the sub-type masks.
 
 Run with `--debug` and open `out/walkthrough.md` to see the image of each sub-step.

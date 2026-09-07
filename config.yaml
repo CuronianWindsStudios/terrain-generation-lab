@@ -44,12 +44,19 @@ biomes:
 heightmap:
   coast_distance_px: 80     # distance from the coast where the base curve reaches 1
   coast_blur_px: 12         # blur of the coast distance, removes creases
-  profile:                  # one height profile for all biomes, heights are fractions of 0..1
-    base: 0.30              # height of the land plateau
-    amplitude: 0.15         # height of the noise hills above and below the base
-    frequency: 6.0          # cycles across the image width, first octave
-    octaves: 5
-    ridged: false           # true gives sharp crests
+  profiles:                 # one height profile per biome type
+    # height = base + amplitude * noise, the noise is in 0..1
+    # base:        lowest height of the biome, in -1..1. Below 0 is under the sea level, so pools form
+    # amplitude:   height of the hills above the base
+    # frequency:   cycles across the image width, first octave
+    # octaves, lacunarity, persistence: the noise octaves
+    # noise:       fractal (rolling hills), ridged (sharp crests), or billow (round bulges)
+    # blend_px:    blur of this biome mask at its border
+    sea_side:         {base:  0.01, amplitude: 0.08, frequency: 12.0, octaves: 3, lacunarity: 2.0, persistence: 0.5, noise: fractal, blend_px: 25}
+    marshlands:       {base: -0.03, amplitude: 0.12, frequency:  6.0, octaves: 2, lacunarity: 2.0, persistence: 0.5, noise: fractal, blend_px: 25}
+    ancient_grove:    {base:  0.13, amplitude: 0.24, frequency:  5.0, octaves: 5, lacunarity: 2.0, persistence: 0.5, noise: fractal, blend_px: 25}
+    enchanted_forest: {base:  0.15, amplitude: 0.30, frequency:  6.0, octaves: 5, lacunarity: 2.0, persistence: 0.5, noise: fractal, blend_px: 25}
+    mountain_range:   {base:  0.20, amplitude: 0.80, frequency:  8.0, octaves: 6, lacunarity: 2.0, persistence: 0.5, noise: ridged,  blend_px: 25}
   seabed_depth: 0.30        # seabed floor as a fraction of the range below sea level
   seabed_distance_px: 150   # distance from the coast where the seabed reaches its floor
   seabed_blur_px: 10        # blur of the seabed, removes creases
