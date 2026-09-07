@@ -12,7 +12,8 @@ landmass:
   count: 3
   seed_area_pct: 50         # seed points lie inside this % of the circle radius
   min_separation_pct: 70    # minimum distance between seed points, as % of the radius
-  radius_pct: [45, 55]      # landmass radius, random in this range, as % of the circle radius
+  radius_pct: [55, 65]      # landmass radius, random in this range, as % of the circle radius
+  channel_pct: 12           # width of the sea channel between landmasses, as % of the radius
   noise:
     octaves: 6
     frequency: 3.0          # cycles across the image width, first octave

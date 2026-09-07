@@ -39,7 +39,8 @@ class LandmassConfig:
     count: int = 3
     seed_area_pct: float = 50.0
     min_separation_pct: float = 70.0
-    radius_pct: tuple[float, float] = (45.0, 55.0)
+    radius_pct: tuple[float, float] = (55.0, 65.0)
+    channel_pct: float = 12.0
     noise: NoiseConfig = field(default_factory=NoiseConfig)
     noise_strength: float = 0.45
     threshold: float = 0.4
@@ -155,6 +156,7 @@ def config_from_dict(data: dict) -> Config:
             seed_area_pct=float(lm["seed_area_pct"]),
             min_separation_pct=float(lm["min_separation_pct"]),
             radius_pct=tuple(float(v) for v in lm["radius_pct"]),
+            channel_pct=float(lm["channel_pct"]),
             noise=NoiseConfig(**lm["noise"]),
             noise_strength=float(lm["noise_strength"]),
             threshold=float(lm["threshold"]),
