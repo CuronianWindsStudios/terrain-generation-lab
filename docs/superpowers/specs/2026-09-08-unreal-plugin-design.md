@@ -114,9 +114,12 @@ ranges. A bad config returns an error string, never an assert.
 Random numbers: one `FRandomStream` per stage and attempt, seeded from a hash of the world
 seed, the stage number, and the attempt number, as in Python.
 
-Memory at 4033 px: a float grid is 65 MB. The stages free their scratch grids when they finish.
-The peak is about 8 float grids, under 600 MB. At 8129 px the peak is about 2.2 GB, and the
-plugin logs a warning above 4033 px.
+Memory at 4033 px: a float grid is 65 MB. The first version of the core (phases 1 and 2, built on
+2026-09-08) keeps every stage result alive to the end and holds 16 float grids in the heightmap
+stage, so its peak is about 1.7 GB at 4033 px and near 7 GB at 8129 px. The first task of the
+phase 3 plan is a memory pass: id grids as `uint8`, one weight grid at a time in the heightmap,
+no `CenterDistance` grid, no debug grid copies, and a measured 4033 px run that replaces these
+figures. The target stays under 600 MB at 4033 px. The plugin logs a warning above 4033 px.
 
 Threads inside the core: the separable passes of the distance transform and the blur split
 their rows over `ParallelFor`. Everything else is single-threaded on the worker.
@@ -308,7 +311,8 @@ Each phase ends with the tests green and a commit.
 
 ## 15. Risks
 
-- **Performance at 8129 px.** The memory peak is about 2.2 GB and the tile build takes minutes.
+- **Performance at 8129 px.** The memory peak of the first core version is near 7 GB before the
+  phase 3 memory pass, and the tile build takes minutes.
   The default stays 4033 px. If the game needs more detail, add it in the material, not in the
   heightmap.
 - **Dynamic Mesh at 256 tiles.** Each tile is one draw call per LOD. 256 components with 4 LOD
