@@ -54,13 +54,13 @@ TerrainGen/
       Private/                    one .cpp per header
     TerrainGen/                   the UObject layer
       Public/
-        TerrainConfigAsset.h      UTerrainConfig: a USTRUCT mirror of the config, JSON load and save
+        TerrainConfigAsset.h      UTerrainConfig: a Data Asset mirror of the config, JSON load and save
         TerrainWorldGenerator.h   UTerrainWorldGenerator: async generation, progress, result
         TerrainTextures.h         transient textures from the arrays
         TerrainActor.h            ATerrainWorld: the tiles, the material, the water, the collision
       Private/
       Content/                    the master material, the water material, a debug material
-    TerrainGenEditor/             editor only, phase 4
+    TerrainGenEditor/             editor only, phase 5
       Public/
         TerrainEditorTools.h      run in editor, write PNG files, import into a Landscape
       Private/
