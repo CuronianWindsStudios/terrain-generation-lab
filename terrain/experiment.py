@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import shutil
 import time
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -59,6 +61,15 @@ def build_overrides(values: dict) -> dict:
         "coast_band_px": ("biomes", "coast_band_px"),
         "coast_distance_px": ("heightmap", "coast_distance_px"),
         "seabed_depth": ("heightmap", "seabed_depth"),
+        "spit_bay_pct": ("spit", "bay_pct"),
+        "spit_lagoon_pct": ("spit", "lagoon_pct"),
+        "spit_min_lagoon_pct": ("spit", "min_lagoon_pct"),
+        "spit_width_pct": ("spit", "width_pct"),
+        "spit_width_variation": ("spit", "width_variation"),
+        "spit_strait_pct": ("spit", "strait_pct"),
+        "spit_gap_pct": ("spit", "gap_pct"),
+        "spit_edge_noise_pct": ("spit", "edge_noise_pct"),
+        "spit_rise_px": ("spit", "rise_px"),
     }
     for key, path in simple.items():
         if key in v:
@@ -67,6 +78,8 @@ def build_overrides(values: dict) -> dict:
         put(("landmass", "radius_pct"), [v["radius_min"], v["radius_max"]])
     if "seeds_min" in v and "seeds_max" in v:
         put(("biomes", "seeds_per_landmass"), [v["seeds_min"], v["seeds_max"]])
+    if "spit_length_min" in v and "spit_length_max" in v:
+        put(("spit", "length_pct"), [v["spit_length_min"], v["spit_length_max"]])
     for key, value in v.items():
         if not key.startswith("profile_"):
             continue
@@ -116,10 +129,50 @@ def save_result(result: ExperimentResult, target_dir: str | Path) -> list[Path]:
             shutil.rmtree(dst)
         shutil.copytree(src, dst)
         written += sorted(dst.iterdir())
+    data = config_to_dict(result.config)
     cfg_path = target / "config.yaml"
-    cfg_path.write_text(yaml.safe_dump(config_to_dict(result.config), sort_keys=False), encoding="utf-8")
+    cfg_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
     written.append(cfg_path)
+    json_path = target / "config.json"
+    json_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    written.append(json_path)
     return written
+
+
+def settings_json(overrides: dict) -> str:
+    """The full config as JSON text: the defaults with the overrides applied."""
+    return json.dumps(config_to_dict(config_from_dict(overrides)), indent=2)
+
+
+ZIP_README = """Terrain export
+==============
+
+config.json / config.yaml   the settings of this world. Run them again with:
+                            python -m terrain --config config.json
+unreal/heightmap.png        16-bit heightmap. Sea level is at value 32768.
+unreal/weight_<biome>.png   one layer weight map per biome type. They add up to 255 at each pixel.
+unreal/subtype_<biome>_<A|B|C>.png   one mask per sub-type.
+unreal/params.json          the seed, the settings, the region list, and the Unreal import settings.
+preview/                    images for people: the hill shade, the biome maps, and an 8-bit heightmap.
+
+Import into Unreal: open the Landscape mode, select Import from File, and pick unreal/heightmap.png.
+Use the section size, the sections per component, and the components from unreal/params.json.
+Import each weight_*.png as a layer.
+"""
+
+
+def export_zip(result: ExperimentResult) -> bytes:
+    """A ZIP with the config as JSON and YAML, the Unreal files, and the previews."""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        data = config_to_dict(result.config)
+        zf.writestr("config.json", json.dumps(data, indent=2))
+        zf.writestr("config.yaml", yaml.safe_dump(data, sort_keys=False))
+        zf.writestr("README.txt", ZIP_README)
+        for sub in ("unreal", "preview"):
+            for path in sorted((result.out_dir / sub).iterdir()):
+                zf.write(path, f"{sub}/{path.name}")
+    return buffer.getvalue()
 
 
 def profile_height_crop(profile: Profile, size: int, seed: int, biome_index: int, crop_px: int) -> np.ndarray:

@@ -84,3 +84,43 @@ def test_round_trip_dict():
     cfg = Config()
     again = config_from_dict(config_to_dict(cfg))
     assert config_to_dict(again) == config_to_dict(cfg)
+
+
+def test_spit_defaults():
+    cfg = config_from_dict({})
+    assert cfg.spit.length_pct[0] <= cfg.spit.length_pct[1]
+    assert cfg.spit.bay_pct >= 0
+    assert cfg.spit.lagoon_pct > 0
+    assert cfg.spit.min_lagoon_pct > 0
+    assert cfg.spit.width_pct > 0
+    assert 0 <= cfg.spit.width_variation < 1
+    assert cfg.spit.strait_pct >= 0
+    assert cfg.spit.rise_px > 0
+    assert cfg.biomes.types[0].placement == "spit"
+
+
+def test_spit_placement_is_valid_and_seeds_count_the_other_types():
+    # 4 biome types get seeds, so 4 seeds per landmass is enough
+    cfg = config_from_dict({"biomes": {"seeds_per_landmass": [4, 6]}})
+    assert cfg.biomes.seeds_per_landmass == (4, 6)
+    with pytest.raises(ConfigError, match="lo >= 4"):
+        config_from_dict({"biomes": {"seeds_per_landmass": [3, 6]}})
+
+
+def test_bad_spit_values_raise():
+    with pytest.raises(ConfigError, match="spit.length_pct"):
+        config_from_dict({"spit": {"length_pct": [80, 30]}})
+    with pytest.raises(ConfigError, match="spit.lagoon_pct"):
+        config_from_dict({"spit": {"lagoon_pct": 0}})
+    with pytest.raises(ConfigError, match="spit.width_pct"):
+        config_from_dict({"spit": {"width_pct": 0}})
+    with pytest.raises(ConfigError, match="spit.width_variation"):
+        config_from_dict({"spit": {"width_variation": 1.0}})
+
+
+def test_load_json_config(tmp_path):
+    path = tmp_path / "c.json"
+    path.write_text('{"size": 505, "seed": 7, "spit": {"length_pct": [20, 60]}}', encoding="utf-8")
+    cfg = load_config(path)
+    assert cfg.size == 505 and cfg.seed == 7
+    assert cfg.spit.length_pct == (20.0, 60.0)

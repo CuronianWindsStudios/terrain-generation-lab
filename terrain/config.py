@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 import copy
+import json
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 import yaml
 
 UNREAL_SIZES = (127, 253, 505, 1009, 2017, 4033, 8129)
-PLACEMENTS = ("coast", "low", "inland", "any")
+PLACEMENTS = ("spit", "coast", "low", "inland", "any")
 SUBTYPE_LETTERS = ("A", "B", "C")
 NOISE_TYPES = ("fractal", "ridged", "billow")
 
@@ -65,7 +66,7 @@ class BiomeType:
 
 def default_biome_types() -> list[BiomeType]:
     return [
-        BiomeType("sea_side", "Sea Side (Neringa)", "coast"),
+        BiomeType("sea_side", "Sea Side (Neringa)", "spit"),
         BiomeType("marshlands", "Marshlands", "low"),
         BiomeType("ancient_grove", "Ancient Grove", "any"),
         BiomeType("enchanted_forest", "Enchanted Forest", "any"),
@@ -75,13 +76,33 @@ def default_biome_types() -> list[BiomeType]:
 
 @dataclass
 class BiomesConfig:
-    seeds_per_landmass: tuple[int, int] = (5, 7)
+    seeds_per_landmass: tuple[int, int] = (4, 6)
     min_seed_separation_px: float = 60.0
     coast_band_px: float = 40.0
     inland_fraction: float = 0.7
     max_retries: int = 10
     warp: WarpConfig = field(default_factory=WarpConfig)
     types: list[BiomeType] = field(default_factory=default_biome_types)
+
+
+@dataclass
+class SpitConfig:
+    """One sand bar per landmass. The bar runs along the coast at the lagoon distance and joins the
+    coast at both ends. It crosses the bay mouths, so the bays become lagoons.
+
+    The sizes marked pct are a percentage of the circle radius, except min_lagoon_pct, which is a
+    percentage of the landmass area. So every image size gives the same shape.
+    """
+    bay_pct: float = 15.0             # disk size of the bay search: bays narrower than 2x this are crossed
+    lagoon_pct: float = 5.0           # width of the water behind the bar
+    length_pct: tuple[float, float] = (40.0, 90.0)  # bar length, random in this range
+    min_lagoon_pct: float = 3.0       # smallest lagoon area, % of the landmass area
+    width_pct: float = 4.0            # base width of the bar
+    width_variation: float = 0.5      # the width varies by this fraction along the bar
+    strait_pct: float = 2.5           # opening near one end. 0 closes the lagoon
+    edge_noise_pct: float = 1.0
+    gap_pct: float = 6.0              # smallest distance to other land
+    rise_px: float = 6.0
 
 
 @dataclass
@@ -130,6 +151,7 @@ class Config:
     circle: CircleConfig = field(default_factory=CircleConfig)
     landmass: LandmassConfig = field(default_factory=LandmassConfig)
     biomes: BiomesConfig = field(default_factory=BiomesConfig)
+    spit: SpitConfig = field(default_factory=SpitConfig)
     heightmap: HeightmapConfig = field(default_factory=HeightmapConfig)
     export: ExportConfig = field(default_factory=ExportConfig)
 
@@ -153,6 +175,7 @@ def config_from_dict(data: dict) -> Config:
     lm = d["landmass"]
     bi = d["biomes"]
     hm = d["heightmap"]
+    sp = d["spit"]
     cfg = Config(
         seed=int(d["seed"]),
         size=int(d["size"]),
@@ -178,6 +201,8 @@ def config_from_dict(data: dict) -> Config:
             warp=WarpConfig(**bi["warp"]),
             types=[BiomeType(**t) for t in bi["types"]],
         ),
+        spit=SpitConfig(**{k: (tuple(float(x) for x in v) if k == "length_pct" else float(v))
+                           for k, v in sp.items()}),
         heightmap=HeightmapConfig(
             coast_distance_px=float(hm["coast_distance_px"]),
             coast_blur_px=float(hm["coast_blur_px"]),
@@ -208,10 +233,28 @@ def validate(cfg: Config) -> None:
         if t.name not in cfg.heightmap.profiles:
             raise ConfigError(f"heightmap.profiles has no entry for biome {t.name}.")
     lo, hi = cfg.biomes.seeds_per_landmass
-    if lo < len(cfg.biomes.types) or hi < lo:
+    n_seeded = sum(1 for t in cfg.biomes.types if t.placement != "spit")
+    if lo < n_seeded or hi < lo:
         raise ConfigError(
-            f"biomes.seeds_per_landmass must be [lo, hi] with lo >= 5 and hi >= lo. Got {lo}, {hi}."
+            f"biomes.seeds_per_landmass must be [lo, hi] with lo >= {n_seeded} and hi >= lo. Got {lo}, {hi}."
         )
+    sp = cfg.spit
+    if not 0 < sp.length_pct[0] <= sp.length_pct[1]:
+        raise ConfigError(f"spit.length_pct must be [lo, hi] with 0 < lo <= hi. Got {list(sp.length_pct)}.")
+    if sp.bay_pct < 0:
+        raise ConfigError(f"spit.bay_pct must be >= 0. Got {sp.bay_pct}.")
+    if sp.lagoon_pct <= 0:
+        raise ConfigError(f"spit.lagoon_pct must be > 0. Got {sp.lagoon_pct}.")
+    if sp.min_lagoon_pct <= 0:
+        raise ConfigError(f"spit.min_lagoon_pct must be > 0. Got {sp.min_lagoon_pct}.")
+    if sp.width_pct <= 0:
+        raise ConfigError(f"spit.width_pct must be > 0. Got {sp.width_pct}.")
+    if not 0 <= sp.width_variation < 1:
+        raise ConfigError(f"spit.width_variation must be in [0, 1). Got {sp.width_variation}.")
+    if sp.rise_px <= 0:
+        raise ConfigError(f"spit.rise_px must be > 0. Got {sp.rise_px}.")
+    if sp.strait_pct < 0 or sp.gap_pct < 0 or sp.edge_noise_pct < 0:
+        raise ConfigError("spit.strait_pct, spit.gap_pct, and spit.edge_noise_pct must be >= 0.")
     for name, p in cfg.heightmap.profiles.items():
         prefix = f"heightmap.profiles.{name}"
         if not -1 <= p.base <= 1:
@@ -236,7 +279,10 @@ def load_config(path: str | Path | None = None, overrides: dict | None = None) -
     data: dict = {}
     if path is not None:
         with open(path, "r", encoding="utf-8") as fh:
-            data = yaml.safe_load(fh) or {}
+            if str(path).lower().endswith(".json"):
+                data = json.load(fh) or {}
+            else:
+                data = yaml.safe_load(fh) or {}
     if overrides:
         data = _merge(data, overrides)
     return config_from_dict(data)

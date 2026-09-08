@@ -40,7 +40,8 @@ def biome_weights(biome_ids: np.ndarray, blend_px: list[float]) -> np.ndarray:
 
 
 def make_heightmap(circle: CircleResult, land: LandResult, biomes: BiomeResult,
-                   cfg: HeightmapConfig, seed: int, recorder: StepRecorder) -> HeightResult:
+                   cfg: HeightmapConfig, seed: int, recorder: StepRecorder,
+                   spit_rise_px: float = 6.0) -> HeightResult:
     size = land.land_mask.shape[0]
     land_mask = land.land_mask
     names = biomes.type_names
@@ -56,15 +57,24 @@ def make_heightmap(circle: CircleResult, land: LandResult, biomes: BiomeResult,
 
     smooth_signed = ndimage.gaussian_filter(signed, sigma=cfg.coast_blur_px)
     curve = smoothstep(np.clip(smooth_signed / cfg.coast_distance_px, 0.0, 1.0)).astype(np.float32)
+    spit_curve = smoothstep(np.clip(biomes.coast_distance / spit_rise_px, 0.0, 1.0)).astype(np.float32)
+    curve = np.where(land.spit_mask, spit_curve, curve)
     curve[~land_mask] = 0.0
     recorder.step(
         "04b", "Coast curve", curve,
         "A smooth curve from 0 at the coast to 1 at coast_distance_px inland. The generator blurs "
-        "the coast distance first, so the curve has no creases. The curve keeps the coast at sea level.",
-        {"coast_distance_px": cfg.coast_distance_px, "coast_blur_px": cfg.coast_blur_px},
+        "the coast distance first, so the curve has no creases. The curve keeps the coast at sea level. "
+        "A spit is narrow, so on the spit the curve reaches 1 at the short spit rise distance instead.",
+        {"coast_distance_px": cfg.coast_distance_px, "coast_blur_px": cfg.coast_blur_px,
+         "spit_rise_px": spit_rise_px},
     )
 
     weights = biome_weights(biomes.biome_ids, [p.blend_px for p in profiles])
+    spit = land.spit_mask
+    if spit.any():
+        # a spit is narrow, so it keeps its own profile: the mainland profiles do not blend into it
+        weights[:, spit] = 0.0
+        weights[biomes.biome_ids[spit] - 1, np.nonzero(spit)[0], np.nonzero(spit)[1]] = 1.0
     base_map = np.zeros((size, size), dtype=np.float32)
     amp_map = np.zeros((size, size), dtype=np.float32)
     noise_map = np.zeros((size, size), dtype=np.float32)
@@ -77,7 +87,7 @@ def make_heightmap(circle: CircleResult, land: LandResult, biomes: BiomeResult,
         "Each biome type has its own height profile. The base is the lowest height of the biome. "
         "A base below 0 makes pools below the sea level. The generator blurs each biome mask with "
         "the blend_px of that biome and mixes the profiles, so the height changes smoothly at "
-        "biome borders. This image is the mixed base height.",
+        "biome borders. Spit pixels keep the spit profile only. This image is the mixed base height.",
         {"base": {n: p.base for n, p in zip(names, profiles)},
          "blend_px": {n: p.blend_px for n, p in zip(names, profiles)}},
     )

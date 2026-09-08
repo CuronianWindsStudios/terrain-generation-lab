@@ -25,7 +25,7 @@ landmass:
   max_retries: 10           # tries with the next seed when the count is wrong
 
 biomes:
-  seeds_per_landmass: [5, 7]
+  seeds_per_landmass: [4, 6]  # mainland regions per landmass; the spit adds 3 regions
   min_seed_separation_px: 60
   coast_band_px: 40         # "coast" seeds lie within this distance from the coast
   inland_fraction: 0.7      # "inland" seeds lie beyond this fraction of the max coast distance
@@ -35,11 +35,23 @@ biomes:
     frequency: 5.0
     octaves: 5
   types:
-    - {name: sea_side,         label: "Sea Side (Neringa)", placement: coast}
+    - {name: sea_side,         label: "Sea Side (Neringa)", placement: spit}   # covers the spits
     - {name: marshlands,       label: "Marshlands",         placement: low}
     - {name: ancient_grove,    label: "Ancient Grove",      placement: any}
     - {name: enchanted_forest, label: "Enchanted Forest",   placement: any}
     - {name: mountain_range,   label: "Mountain Range",     placement: inland}
+
+spit:                       # one sand bar per landmass, like the Curonian Spit. It joins the coast at both ends
+  bay_pct: 15               # bay search disk, % of the circle radius. The bar crosses bays narrower than 2x this
+  lagoon_pct: 5             # width of the water behind the bar, % of the radius
+  length_pct: [40, 90]      # bar length, random in this range, % of the radius
+  min_lagoon_pct: 3         # smallest lagoon area, % of the landmass area. Smaller makes the stage retry
+  width_pct: 4.0            # base width of the bar, % of the radius
+  width_variation: 0.5      # the width varies by this fraction along the bar
+  strait_pct: 2.5           # opening near one end, % of the radius. 0 closes the lagoon
+  edge_noise_pct: 1.0       # noise on the bar edges
+  gap_pct: 6                # smallest distance to other land, % of the radius
+  rise_px: 6                # distance from the bar coast where the dunes reach their full height
 
 heightmap:
   coast_distance_px: 80     # distance from the coast where the base curve reaches 1

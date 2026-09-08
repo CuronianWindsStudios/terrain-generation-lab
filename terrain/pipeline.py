@@ -30,9 +30,9 @@ def run_pipeline(cfg: Config, out_dir: str | Path, debug: bool = False) -> Pipel
     out.mkdir(parents=True, exist_ok=True)
     recorder = StepRecorder(out, debug)
     circle = make_circle(cfg.size, cfg.circle, recorder)
-    land = make_landmasses(circle, cfg.landmass, cfg.seed, recorder)
+    land = make_landmasses(circle, cfg.landmass, cfg.seed, recorder, cfg.spit)
     biomes = make_biomes(land, cfg.biomes, cfg.seed, recorder)
-    height = make_heightmap(circle, land, biomes, cfg.heightmap, cfg.seed, recorder)
+    height = make_heightmap(circle, land, biomes, cfg.heightmap, cfg.seed, recorder, cfg.spit.rise_px)
     seeds_used = {"landmass": land.seed_used, "biomes": biomes.seed_used}
     files = export_unreal(cfg, land, biomes, height, out / "unreal", seeds_used)
     files += write_previews(cfg, biomes, height, out / "preview")

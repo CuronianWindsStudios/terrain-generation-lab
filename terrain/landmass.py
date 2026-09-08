@@ -1,15 +1,16 @@
 """Stage 2: three landmasses inside the circle."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 from scipy import ndimage
 
 from terrain.circle import CircleResult
-from terrain.config import GenerationError, LandmassConfig
-from terrain.debug import StepRecorder
+from terrain.config import GenerationError, LandmassConfig, SpitConfig
+from terrain.debug import StepRecorder, draw_dots
 from terrain.noise import fractal_noise, smoothstep
+from terrain.spit import make_spits
 
 STAGE = 2
 
@@ -20,16 +21,16 @@ class LandResult:
     landmass_ids: np.ndarray
     seeds: list[tuple[float, float]]
     seed_used: int
+    spit_mask: np.ndarray = None
+    spit_owner: np.ndarray = None
+    spit_lengths_px: list[float] = field(default_factory=list)
 
-
-def draw_dots(shape, points, radius: float, values=None) -> np.ndarray:
-    """White (or valued) discs on black, for the debug images."""
-    yy, xx = np.mgrid[0:shape[0], 0:shape[1]].astype(np.float32)
-    out = np.zeros(shape, dtype=np.float32)
-    for i, (x, y) in enumerate(points):
-        v = 1.0 if values is None else float(values[i])
-        out[np.hypot(xx - x, yy - y) <= radius] = v
-    return out
+    def __post_init__(self):
+        shape = self.land_mask.shape
+        if self.spit_mask is None:
+            self.spit_mask = np.zeros(shape, dtype=bool)
+        if self.spit_owner is None:
+            self.spit_owner = np.zeros(shape, dtype=np.int32)
 
 
 def _place_seeds(rng, count, area_radius, separation, cx, cy):
@@ -179,22 +180,48 @@ def _attempt(circle: CircleResult, cfg: LandmassConfig, rng, recorder: StepRecor
     return LandResult(land_mask=land, landmass_ids=ids, seeds=seeds, seed_used=0), count
 
 
+def _add_spits(circle: CircleResult, result: LandResult, spit_cfg: SpitConfig, rng,
+               recorder: StepRecorder, tag: str) -> str | None:
+    """Adds one sand bar per landmass to the result. Returns a problem string when a bar does not fit."""
+    spits = make_spits(circle, result, spit_cfg, rng, recorder, tag)
+    if spits.problem is not None:
+        return spits.problem
+    result.land_mask = result.land_mask | spits.mask
+    result.landmass_ids = np.where(spits.mask, spits.owner, result.landmass_ids).astype(np.int32)
+    result.spit_mask = spits.mask
+    result.spit_owner = spits.owner
+    result.spit_lengths_px = list(spits.lengths_px)
+    recorder.step(
+        f"02k{tag}", "Land with sand bars", result.landmass_ids,
+        "The sand bars join the land mask. Each bar pixel gets the ID of its landmass. "
+        "The water behind a bar is the lagoon.",
+        {"spit_px": int(spits.mask.sum())},
+    )
+    return None
+
+
 def make_landmasses(circle: CircleResult, cfg: LandmassConfig, seed: int,
-                    recorder: StepRecorder) -> LandResult:
+                    recorder: StepRecorder, spit_cfg: SpitConfig | None = None) -> LandResult:
     count = 0
+    problem = ""
     for attempt in range(cfg.max_retries):
         rng = np.random.default_rng([seed, STAGE, attempt])
         result, count = _attempt(circle, cfg, rng, recorder, attempt)
         if count == cfg.count:
-            result.seed_used = seed + attempt
-            return result
+            tag = "" if attempt == 0 else f"-try{attempt + 1}"
+            spit_problem = None if spit_cfg is None else _add_spits(circle, result, spit_cfg, rng, recorder, tag)
+            if spit_problem is None:
+                result.seed_used = seed + attempt
+                return result
+            problem = f"Try {attempt + 1} could not fit a sand bar: {spit_problem}."
+        else:
+            problem = f"Try {attempt + 1} gave {count} landmasses, not {cfg.count}."
         recorder.note(
             f"02-retry-{attempt}", "Retry",
-            f"Try {attempt + 1} gave {count} landmasses, not {cfg.count}. "
-            "The stage tries again with the next seed.",
+            f"{problem} The stage tries again with the next seed.",
             {"seed": seed + attempt, "count": count},
         )
     raise GenerationError(
-        f"Seed {seed} gave {count} landmasses after {cfg.max_retries} tries. "
-        "Decrease landmass.threshold or increase landmass.channel_pct."
+        f"Seed {seed} failed after {cfg.max_retries} tries. {problem} "
+        "Decrease landmass.threshold, increase landmass.channel_pct, or decrease spit.min_lagoon_pct."
     )

@@ -7,7 +7,7 @@ from pathlib import Path
 import streamlit as st
 
 from terrain.config import NOISE_TYPES, SUBTYPE_LETTERS, Config, GenerationError, Profile, UNREAL_SIZES
-from terrain.experiment import PROFILE_FIELDS, build_overrides, generate, profile_preview, save_result
+from terrain.experiment import PROFILE_FIELDS, build_overrides, export_zip, generate, profile_preview, save_result
 from terrain.export import SEA_COLOR, biome_color
 
 WORK_DIR = Path("out") / "ui"
@@ -83,9 +83,32 @@ with st.sidebar:
     with st.expander("Biomes"):
         bi = DEFAULTS.biomes
         biome_warp_px = st.slider("Border warp px", 0.0, 200.0, bi.warp.strength_px, 5.0)
-        seeds_min, seeds_max = st.slider("Regions per landmass", 5, 12,
-                                         (bi.seeds_per_landmass[0], bi.seeds_per_landmass[1]), 1)
+        seeds_min, seeds_max = st.slider("Regions per landmass", 4, 12,
+                                         (bi.seeds_per_landmass[0], bi.seeds_per_landmass[1]), 1,
+                                         help="Mainland regions. The Sea Side spit adds 3 regions per landmass.")
         coast_band_px = st.slider("Coast band px", 5.0, 120.0, bi.coast_band_px, 5.0)
+
+    with st.expander("Sea Side sand bar"):
+        sp = DEFAULTS.spit
+        st.caption("One sand bar per landmass runs along the coast and joins it at both ends. "
+                   "The water behind it is the lagoon. Sizes marked % are a percentage of the circle radius.")
+        spit_bay_pct = st.slider("Bay size %", 0.0, 40.0, sp.bay_pct, 1.0,
+                                 help="The bar crosses bays narrower than twice this size. 0 follows every bay.")
+        spit_lagoon_pct = st.slider("Lagoon width %", 1.0, 20.0, sp.lagoon_pct, 0.5,
+                                    help="Width of the water behind the bar.")
+        spit_length_min, spit_length_max = st.slider("Length % range", 10.0, 200.0,
+                                                     (sp.length_pct[0], sp.length_pct[1]), 5.0)
+        spit_min_lagoon_pct = st.slider("Min lagoon % of the landmass", 0.5, 20.0, sp.min_lagoon_pct, 0.5,
+                                        help="Smallest lagoon area. A smaller lagoon makes the stage retry.")
+        spit_width_pct = st.slider("Bar width %", 1.0, 12.0, sp.width_pct, 0.2)
+        spit_width_variation = st.slider("Width variation", 0.0, 0.9, sp.width_variation, 0.05,
+                                         help="The width varies by this fraction along the bar.")
+        spit_strait_pct = st.slider("Strait width %", 0.0, 15.0, sp.strait_pct, 0.5,
+                                    help="Opening near one end of the bar. 0 closes the lagoon.")
+        spit_gap_pct = st.slider("Gap to other land %", 0.0, 30.0, sp.gap_pct, 1.0)
+        spit_edge_noise_pct = st.slider("Edge noise %", 0.0, 4.0, sp.edge_noise_pct, 0.1)
+        spit_rise_px = st.slider("Height rise px", 1.0, 30.0, sp.rise_px, 1.0,
+                                 help="Distance from the bar coast where the dunes reach their full height.")
 
     with st.expander("Heightmap"):
         hm = DEFAULTS.heightmap
@@ -140,6 +163,12 @@ values = {
     "biome_warp_px": biome_warp_px, "seeds_min": int(seeds_min), "seeds_max": int(seeds_max),
     "coast_band_px": coast_band_px, "coast_distance_px": coast_distance_px,
     "seabed_depth": seabed_depth,
+    "spit_bay_pct": spit_bay_pct, "spit_lagoon_pct": spit_lagoon_pct,
+    "spit_length_min": spit_length_min, "spit_length_max": spit_length_max,
+    "spit_min_lagoon_pct": spit_min_lagoon_pct,
+    "spit_width_pct": spit_width_pct, "spit_width_variation": spit_width_variation,
+    "spit_strait_pct": spit_strait_pct, "spit_gap_pct": spit_gap_pct,
+    "spit_edge_noise_pct": spit_edge_noise_pct, "spit_rise_px": spit_rise_px,
     **profile_values,
 }
 overrides = build_overrides(values)
@@ -213,10 +242,25 @@ with st.expander("Seed browser"):
                 col.error(f"Seed {s}: {exc}")
             col.button("Use this seed", key=f"use_{s}", on_click=set_seed, args=(s,))
 
-# ---------------------------------------------------------------- save
-with st.expander("Save"):
+# ---------------------------------------------------------------- save and export
+@st.cache_data(show_spinner=False)
+def cached_zip(out_dir: str, _result) -> bytes:
+    """Keyed by the output folder. Streamlit does not hash the _result argument."""
+    return export_zip(_result)
+
+
+with st.expander("Save and export", expanded=True):
+    st.write("The export holds the settings as `config.json` and `config.yaml`, the Unreal files, and the previews.")
+    if result is None:
+        st.warning("Generate first.")
+    else:
+        st.download_button(
+            "Download ZIP for Unreal", data=cached_zip(str(result.out_dir), result),
+            file_name=f"terrain_seed_{result.config.seed}_{result.config.size}.zip",
+            mime="application/zip", type="primary",
+        )
     target = st.text_input("Folder", value=str(Path("out") / "saved" / f"seed_{st.session_state.seed}"))
-    if st.button("Save Unreal files and config"):
+    if st.button("Save Unreal files and config to the folder"):
         if result is None:
             st.warning("Generate first.")
         else:

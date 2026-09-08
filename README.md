@@ -18,7 +18,7 @@ python -m terrain --seed 42 --size 1009 --diameter 90 --out out --debug
 
 | Flag | Meaning | Default |
 |---|---|---|
-| `--config PATH` | YAML file with parameters, see `config.yaml` | built-in defaults |
+| `--config PATH` | YAML or JSON file with parameters, see `config.yaml` | built-in defaults |
 | `--seed INT` | random seed | 42 |
 | `--size INT` | image size: 127, 253, 505, 1009, 2017, 4033, or 8129 | 1009 |
 | `--diameter FLOAT` | circle diameter as a percentage of the width | 90 |
@@ -34,12 +34,15 @@ streamlit run ui.py
 ```
 
 The command opens a page in the browser. The sidebar has the seed, the size, the diameter, and
-sliders for the landmass, biome, and heightmap parameters. Click Generate to run the pipeline.
+sliders for the landmass, biome, sand bar, and heightmap parameters. Click Generate to run the pipeline.
 The page shows the color biome map, the hill shade, and the heightmap. Open the Steps section to
 see every sub-step image with its formula and its parameters. The Seed browser generates 6 seeds
-at a small size, and a button under each thumbnail loads that seed. The Save section copies the
-Unreal files and writes a `config.yaml` with the current settings to a folder you name. You can
-run that config later with `python -m terrain --config <folder>/config.yaml`.
+at a small size, and a button under each thumbnail loads that seed.
+
+The Save and export section has a "Download ZIP for Unreal" button. The ZIP holds the settings as
+`config.json` and `config.yaml`, the Unreal files, the previews, and a `README.txt` with the import
+steps. The section can also copy the same files to a folder you name. You can run a saved config
+later with `python -m terrain --config <folder>/config.json`.
 
 ## Output
 
@@ -61,17 +64,26 @@ run that config later with `python -m terrain --config <folder>/config.yaml`.
    A sea channel between the seed points keeps the landmasses apart. A noise warp bends the
    shapes. Fractal noise multiplies the shape mask, so the coast is ragged. The generator keeps
    the 3 largest areas, removes small islands, and fills small lakes.
-3. **Biomes.** The generator scatters region seeds on each landmass. The first 5 seeds on each
-   landmass get one biome type each. Sea Side seeds sit at the coast. Mountain Range seeds sit
-   inland. Each land pixel goes to the nearest seed, with a noise warp for organic borders.
-   Each biome type cycles its regions through the sub-types A, B, and C.
-4. **Heightmap.** The height rises from 0 at the coast with a smooth curve. Each biome type has
+3. **Sand bars.** Each landmass gets one sand bar, like the Curonian Spit. The bar runs along
+   the coast at the lagoon distance and joins the coast at both ends. Across a bay it runs over
+   the bay mouth, so the bay becomes the lagoon. Along an open coast a narrow lagoon lies behind
+   it. A strait at one end keeps the lagoon open to the sea, and the bar tapers to a point there.
+   The width varies along the bar. If no bar encloses enough water, the landmass stage tries the
+   next seed.
+4. **Biomes.** The sand bars are the Sea Side biome. The generator scatters region seeds for the 4
+   other biome types on the mainland of each landmass. Mountain Range seeds sit inland. Each
+   mainland pixel goes to the nearest seed, with a noise warp for organic borders. Each landmass
+   gets one sub-type of each biome type, and no two landmasses share it. Example: landmass 1 has
+   Sea Side B, landmass 2 has Sea Side C, and landmass 3 has Sea Side A. The order is random for
+   each biome type.
+5. **Heightmap.** The height rises from 0 at the coast with a smooth curve. On a sand bar the
+   curve is short, so the dunes reach their full height a few pixels from the water. Each biome type has
    its own height profile: a base height, a hill amplitude, the noise octaves, a noise type
    (fractal, ridged, or billow), and a blend width at its border. The base is the lowest
    height of the biome. The hills go up from the base. A base below 0 puts land under the sea
    level, so pools form. The generator mixes the profiles with blurred biome masks. The seabed
    goes down to a floor at the circle edge.
-5. **Export.** The generator writes the 16-bit heightmap, the weight maps, and the sub-type masks.
+6. **Export.** The generator writes the 16-bit heightmap, the weight maps, and the sub-type masks.
 
 Run with `--debug` and open `out/walkthrough.md` to see the image of each sub-step.
 

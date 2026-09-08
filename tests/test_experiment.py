@@ -1,7 +1,19 @@
+import io
+import json
+import zipfile
+
 import numpy as np
 
 from terrain.config import Profile, config_from_dict
-from terrain.experiment import build_overrides, generate, profile_height_crop, profile_preview, save_result
+from terrain.experiment import (
+    build_overrides,
+    export_zip,
+    generate,
+    profile_height_crop,
+    profile_preview,
+    save_result,
+    settings_json,
+)
 from terrain.heightmap import STAGE
 from terrain.noise import fractal_noise
 
@@ -34,6 +46,42 @@ def test_build_overrides_maps_fields():
     assert cfg.heightmap.profiles["sea_side"].blend_px == 8.0
 
 
+def test_build_overrides_maps_spit_fields():
+    o = build_overrides({
+        "spit_bay_pct": 12.0, "spit_length_min": 20.0, "spit_length_max": 60.0, "spit_lagoon_pct": 5.0,
+        "spit_min_lagoon_pct": 2.0, "spit_width_pct": 4.0,
+        "spit_width_variation": 0.4, "spit_strait_pct": 3.0, "spit_gap_pct": 7.0,
+        "spit_edge_noise_pct": 1.0, "spit_rise_px": 5.0,
+    })
+    assert o == {"spit": {"bay_pct": 12.0, "length_pct": [20.0, 60.0], "lagoon_pct": 5.0, "min_lagoon_pct": 2.0,
+                          "width_pct": 4.0, "width_variation": 0.4,
+                          "strait_pct": 3.0, "gap_pct": 7.0, "edge_noise_pct": 1.0, "rise_px": 5.0}}
+    cfg = config_from_dict(o)
+    assert cfg.spit.length_pct == (20.0, 60.0) and cfg.spit.strait_pct == 3.0
+
+
+def test_settings_json_is_the_full_config():
+    text = settings_json({"seed": 5, "spit": {"lagoon_pct": 5.0}})
+    data = json.loads(text)
+    assert data["seed"] == 5 and data["spit"]["lagoon_pct"] == 5.0
+    assert data["size"] == 1009 and "profiles" in data["heightmap"]
+    assert config_from_dict(data).spit.lagoon_pct == 5.0
+
+
+def test_export_zip_holds_config_and_unreal_files(tmp_path):
+    res = generate({"size": 127, "seed": 3}, tmp_path / "work")
+    data = export_zip(res)
+    with zipfile.ZipFile(io.BytesIO(data)) as zf:
+        names = set(zf.namelist())
+        assert {"config.json", "config.yaml", "README.txt"} <= names
+        assert "unreal/heightmap.png" in names and "unreal/params.json" in names
+        assert sum(n.startswith("unreal/weight_") for n in names) == 5
+        assert sum(n.startswith("unreal/subtype_") for n in names) == 15
+        assert "preview/biomes_color.png" in names
+        cfg = json.loads(zf.read("config.json"))
+        assert cfg["seed"] == 3 and cfg["size"] == 127
+
+
 def test_build_overrides_partial():
     assert build_overrides({"seed": 1}) == {"seed": 1}
 
@@ -45,7 +93,8 @@ def test_generate_and_save(tmp_path):
     assert res.seconds > 0
     files = save_result(res, tmp_path / "saved")
     names = {p.name for p in files}
-    assert {"config.yaml", "heightmap.png", "biomes_color.png"} <= names
+    assert {"config.yaml", "config.json", "heightmap.png", "biomes_color.png"} <= names
+    assert json.loads((tmp_path / "saved" / "config.json").read_text(encoding="utf-8"))["seed"] == 3
     text = (tmp_path / "saved" / "config.yaml").read_text(encoding="utf-8")
     assert "seed: 3" in text
 

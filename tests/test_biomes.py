@@ -2,7 +2,7 @@ import numpy as np
 
 from terrain.biomes import make_biomes, subtype_id
 from terrain.circle import make_circle
-from terrain.config import BiomesConfig, CircleConfig, LandmassConfig
+from terrain.config import SUBTYPE_LETTERS, BiomesConfig, CircleConfig, LandmassConfig, SpitConfig
 from terrain.debug import StepRecorder
 from terrain.landmass import make_landmasses
 
@@ -12,9 +12,66 @@ SIZE = 253
 def _world(seed=42):
     rec = StepRecorder(None, False)
     circle = make_circle(SIZE, CircleConfig(), rec)
-    land = make_landmasses(circle, LandmassConfig(), seed, rec)
+    land = make_landmasses(circle, LandmassConfig(), seed, rec, SpitConfig())
     cfg = BiomesConfig()
     return land, cfg, make_biomes(land, cfg, seed, rec)
+
+
+SPIT_BIOME = 1  # sea_side is the first type, biome id 1
+
+
+def test_sea_side_covers_exactly_the_spits():
+    land, cfg, res = _world()
+    assert cfg.types[0].placement == "spit"
+    assert np.array_equal(res.biome_ids == SPIT_BIOME, land.spit_mask)
+
+
+def test_each_spit_is_one_region_with_one_sub_type():
+    land, _, res = _world()
+    for lm in (1, 2, 3):
+        spit = land.spit_mask & (land.spit_owner == lm)
+        assert len(np.unique(res.region_ids[spit])) == 1
+        assert len(np.unique(res.subtype_ids[spit])) == 1
+
+
+def test_spit_regions_are_listed_once_per_landmass():
+    land, cfg, res = _world()
+    spit_regions = [r for r in res.regions if r.biome_index == 0]
+    assert sorted(r.landmass_id for r in spit_regions) == [1, 2, 3]
+
+
+def test_each_landmass_has_one_sub_type_per_biome_and_no_two_landmasses_share_it():
+    land, cfg, res = _world()
+    for t in range(len(cfg.types)):
+        letters = []
+        for lm in (1, 2, 3):
+            regions = [r for r in res.regions if r.biome_index == t and r.landmass_id == lm]
+            assert regions
+            present = {r.subtype_index for r in regions}
+            assert len(present) == 1
+            letters.append(present.pop())
+        assert sorted(letters) == [0, 1, 2]
+
+
+def test_sub_type_permutations_differ_between_biomes_for_some_seed():
+    # the permutation is random per biome type, so not every biome uses the same A, B, C order
+    found = False
+    for seed in range(1, 6):
+        _, cfg, res = _world(seed)
+        orders = set()
+        for t in range(len(cfg.types)):
+            orders.add(tuple(next(r.subtype_index for r in res.regions
+                                  if r.biome_index == t and r.landmass_id == lm) for lm in (1, 2, 3)))
+        if len(orders) > 1:
+            found = True
+            break
+    assert found
+
+
+def test_mainland_regions_do_not_use_spit_pixels():
+    land, _, res = _world()
+    mainland = land.land_mask & ~land.spit_mask
+    assert set(np.unique(res.biome_ids[mainland]).tolist()) == {2, 3, 4, 5}
 
 
 def test_subtype_id_formula():

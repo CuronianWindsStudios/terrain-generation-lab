@@ -142,7 +142,7 @@ biomes:
     frequency: 5.0
     octaves: 5
   types:
-    - {name: sea_side,         label: "Sea Side (Neringa)", placement: coast}
+    - {name: sea_side,         label: "Sea Side (Neringa)", placement: spit}
     - {name: marshlands,       label: "Marshlands",         placement: low}
     - {name: ancient_grove,    label: "Ancient Grove",      placement: any}
     - {name: enchanted_forest, label: "Enchanted Forest",   placement: any}
@@ -362,3 +362,38 @@ Tests use pytest and a small size (127 or 253) for speed, except where the size 
 - Erosion.
 - More than one circle or more than 3 landmasses.
 - Unreal World Partition tiles.
+
+## Sand bars (added 2026-09-08, revised the same day)
+
+Each landmass gets one sand bar, like the Curonian Spit. The bar is the Sea Side biome. The first
+version was a thin ribbon that hung off the coast into open water. The user rejected that look, so
+the bar now joins the coast at both ends and encloses water.
+
+- The bar runs along the coast at the lagoon distance and joins the coast at both ends. Across a
+  bay it runs over the bay mouth, so the bay becomes the lagoon. Along an open coast a narrow
+  lagoon lies behind it, like a barrier island.
+- The path follows a level line of the distance field of the closed land shape. A morphological
+  closing with a disk of `bay_pct` fills the bays, so the level line crosses the bay mouths. The
+  level ramps up from 0 at the start and back down to 0 at the end, so the bar leaves and rejoins
+  the coast at a tangent. Both ends extend onto the nearest coast pixel.
+- The generator tries several start points on the outer coast, in both directions, and keeps the
+  path that encloses the most water. A path that stops early, near other land or the circle edge,
+  or that encloses less than `min_lagoon_pct` of the landmass area, does not count. If no path
+  counts, the landmass stage retries with the next seed.
+- The strip around the path has a width that varies with low-frequency noise by
+  `width_variation`, plus edge noise. At the strait end the path stops `strait_pct` short of the
+  coast and the width tapers to a point. `strait_pct` 0 closes the lagoon.
+- All sizes are a percentage of the circle radius, except `min_lagoon_pct` (of the landmass area)
+  and `rise_px`. Config section `spit`: `bay_pct`, `lagoon_pct`, `length_pct`, `min_lagoon_pct`,
+  `width_pct`, `width_variation`, `strait_pct`, `edge_noise_pct`, `gap_pct`, `rise_px`.
+- Biomes: the placement `spit` marks the biome type that covers the bars. It gets no region
+  seeds. Each bar is one region. The 4 other biome types get seeds on the mainland only.
+  `seeds_per_landmass` counts the mainland regions, so its minimum is 4.
+- Sub-types: each landmass gets one sub-type of each biome type, and no two landmasses share it.
+  For each biome type the generator draws a random order of A, B, C over the landmasses 1, 2, 3.
+  Every region of that biome on a landmass gets the sub-type of that landmass.
+- Heightmap: on the bar the coast curve reaches 1 at `spit.rise_px` from the water, and the bar
+  pixels use the Sea Side profile only, so the mainland profiles do not blend into the bar.
+- Export: the experiment UI has a "Download ZIP for Unreal" button. The ZIP holds `config.json`,
+  `config.yaml`, `README.txt`, the `unreal/` files, and the `preview/` files. The CLI `--config`
+  flag accepts a JSON file.

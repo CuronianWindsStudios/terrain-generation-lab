@@ -65,3 +65,13 @@ class StepRecorder:
         path = self.out_dir / "walkthrough.md"
         path.write_text("\n".join(lines), encoding="utf-8")
         return path
+
+
+def draw_dots(shape, points, radius: float, values=None) -> np.ndarray:
+    """White (or valued) discs on black, for the debug images."""
+    yy, xx = np.mgrid[0:shape[0], 0:shape[1]].astype(np.float32)
+    out = np.zeros(shape, dtype=np.float32)
+    for i, (x, y) in enumerate(points):
+        v = 1.0 if values is None else float(values[i])
+        out[np.hypot(xx - x, yy - y) <= radius] = v
+    return out

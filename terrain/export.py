@@ -61,6 +61,14 @@ def make_weight_maps(biome_ids: np.ndarray, land_mask: np.ndarray, n_types: int,
     return largest_remainder_255(weights)
 
 
+def seabed_biome_index(cfg: Config) -> int:
+    """The biome that covers the open sea in the weight maps: the spit or coast biome, sand."""
+    for i, t in enumerate(cfg.biomes.types):
+        if t.placement in ("spit", "coast"):
+            return i
+    return 0
+
+
 def unreal_import_settings(size: int, sea_level_value: int) -> dict:
     components = (size - 1) // 126
     return {
@@ -86,10 +94,8 @@ def export_unreal(cfg: Config, land: LandResult, biomes: BiomeResult, height: He
     files.append(save_gray16(out / "heightmap.png",
                              encode_height16(height.height, cfg.export.sea_level_value)))
 
-    coast_types = [i for i, t in enumerate(cfg.biomes.types) if t.placement == "coast"]
-    seabed_index = coast_types[0] if coast_types else 0
     weights = make_weight_maps(biomes.biome_ids, land.land_mask, n_types,
-                               cfg.export.weight_blur_px, seabed_index)
+                               cfg.export.weight_blur_px, seabed_biome_index(cfg))
     for i, t in enumerate(cfg.biomes.types):
         files.append(save_gray8(out / f"weight_{t.name}.png", weights[i]))
 
@@ -107,6 +113,7 @@ def export_unreal(cfg: Config, land: LandResult, biomes: BiomeResult, height: He
         "subtype_ids": {i * n_sub + s + 1: f"{t.label} {letter}"
                         for i, t in enumerate(cfg.biomes.types)
                         for s, letter in enumerate(SUBTYPE_LETTERS)},
+        "spits": [{"landmass": i + 1, "length_px": round(float(v))} for i, v in enumerate(land.spit_lengths_px)],
         "regions": [{"id": r.id, "landmass": r.landmass_id,
                      "biome": cfg.biomes.types[r.biome_index].name,
                      "subtype": SUBTYPE_LETTERS[r.subtype_index],

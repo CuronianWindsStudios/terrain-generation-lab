@@ -8,7 +8,8 @@ from scipy import ndimage
 
 from terrain.config import SUBTYPE_LETTERS, BiomesConfig, GenerationError
 from terrain.debug import StepRecorder
-from terrain.landmass import LandResult, draw_dots
+from terrain.debug import draw_dots
+from terrain.landmass import LandResult
 from terrain.noise import fractal_noise
 
 STAGE = 3
@@ -56,15 +57,21 @@ def _candidates(mask_lm: np.ndarray, coast: np.ndarray, placement: str, cfg: Bio
     return np.nonzero(sel)
 
 
+def _seeded_types(cfg: BiomesConfig) -> list[int]:
+    """The biome types that get region seeds. Spit types cover the spits and get no seeds."""
+    return [i for i, t in enumerate(cfg.types) if t.placement != "spit"]
+
+
 def _place_region_seeds(land: LandResult, coast: np.ndarray, cfg: BiomesConfig, rng) -> list[Region]:
     regions: list[Region] = []
-    n_types = len(cfg.types)
+    seeded = _seeded_types(cfg)
     lo, hi = cfg.seeds_per_landmass
     n_landmasses = int(land.landmass_ids.max())
     for lm in range(1, n_landmasses + 1):
-        mask_lm = land.landmass_ids == lm
+        mask_lm = (land.landmass_ids == lm) & ~land.spit_mask
         n = int(rng.integers(lo, hi + 1))
-        types = list(range(n_types)) + [int(v) for v in rng.integers(0, n_types, size=n - n_types)]
+        extra = rng.integers(0, len(seeded), size=max(n - len(seeded), 0))
+        types = list(seeded) + [seeded[int(v)] for v in extra]
         placed: list[tuple[float, float]] = []
         separation = cfg.min_seed_separation_px
         rejections = 0
@@ -92,12 +99,30 @@ def _grow_regions(land: LandResult, regions: list[Region], dx: np.ndarray, dy: n
     region_ids = np.zeros((size, size), dtype=np.int32)
     for lm in range(1, int(land.landmass_ids.max()) + 1):
         rs = [r for r in regions if r.landmass_id == lm]
-        ys, xs = np.nonzero(land.landmass_ids == lm)
+        ys, xs = np.nonzero((land.landmass_ids == lm) & ~land.spit_mask)
         wx, wy = px[ys, xs], py[ys, xs]
         dist = np.stack([np.hypot(wx - r.seed_xy[0], wy - r.seed_xy[1]) for r in rs])
         best = np.argmin(dist, axis=0)
         region_ids[ys, xs] = np.array([r.id for r in rs], dtype=np.int32)[best]
     return region_ids
+
+
+def _spit_regions(land: LandResult, regions: list[Region], region_ids: np.ndarray,
+                  cfg: BiomesConfig) -> None:
+    """One region per spit. The regions are appended to the list and drawn into region_ids."""
+    spit_types = [i for i, t in enumerate(cfg.types) if t.placement == "spit"]
+    if not spit_types:
+        return
+    biome_index = spit_types[0]
+    yy, xx = np.mgrid[0:region_ids.shape[0], 0:region_ids.shape[1]]
+    for lm in range(1, int(land.landmass_ids.max()) + 1):
+        pix = land.spit_mask & (land.spit_owner == lm)
+        if not pix.any():
+            continue
+        center = (float(xx[pix].mean()), float(yy[pix].mean()))
+        region = Region(id=len(regions) + 1, landmass_id=lm, seed_xy=center, biome_index=biome_index)
+        regions.append(region)
+        region_ids[pix] = region.id
 
 
 def _validate(regions, region_ids, coast, cfg) -> str | None:
@@ -110,11 +135,21 @@ def _validate(regions, region_ids, coast, cfg) -> str | None:
     return None
 
 
-def _assign_subtypes(regions: list[Region], n_types: int) -> None:
+def _assign_subtypes(regions: list[Region], n_types: int, n_landmasses: int, rng) -> dict[int, list[int]]:
+    """Each landmass gets one sub-type of each biome type, and no two landmasses share it.
+
+    For each biome type the generator draws a random order of A, B, C over the landmasses.
+    Returns the order per biome type: biome index -> sub-type index per landmass.
+    """
+    orders = {}
     for t in range(n_types):
-        same = sorted((r for r in regions if r.biome_index == t), key=lambda r: r.id)
-        for i, r in enumerate(same):
-            r.subtype_index = i % N_SUBTYPES
+        order = [int(v) for v in rng.permutation(N_SUBTYPES)]
+        while len(order) < n_landmasses:
+            order += order[:n_landmasses - len(order)]
+        orders[t] = order
+    for r in regions:
+        r.subtype_index = orders[r.biome_index][r.landmass_id - 1]
+    return orders
 
 
 def _attempt(land, coast, cfg, rng, recorder, attempt):
@@ -127,9 +162,10 @@ def _attempt(land, coast, cfg, rng, recorder, attempt):
         f"03b{tag}", "Region seeds",
         draw_dots(land.land_mask.shape, [r.seed_xy for r in regions], 4.0,
                   [(r.biome_index + 1) / n_types for r in regions]),
-        "The generator scatters region seeds on each landmass. The first 5 seeds on each landmass get "
-        "one biome type each, so every landmass has every biome type. Extra seeds get a random biome "
-        "type. Each seed obeys the placement rule of its biome type: coast, low, inland, or any. "
+        "The generator scatters region seeds on the mainland of each landmass, not on the spit. The "
+        "first seeds on each landmass get one biome type each, so every landmass has every biome type. "
+        "Extra seeds get a random biome type. Each seed obeys the placement rule of its biome type: "
+        "low, inland, or any. Spit types get no seeds: they cover the spits. "
         "Brighter dots are later biome types in the list.",
         {"seeds_per_landmass": list(cfg.seeds_per_landmass),
          "min_seed_separation_px": cfg.min_seed_separation_px,
@@ -149,18 +185,20 @@ def _attempt(land, coast, cfg, rng, recorder, attempt):
     )
 
     region_ids = _grow_regions(land, regions, dx, dy)
+    n_seeded = len(regions)
+    _spit_regions(land, regions, region_ids, cfg)
     recorder.step(
         f"03d{tag}", "Region IDs", region_ids,
-        "Each land pixel goes to the nearest seed on the same landmass. The generator measures the "
-        "distance from the warped pixel position, pixel + offset, to the seed.",
-        {"regions": len(regions)},
+        "Each mainland pixel goes to the nearest seed on the same landmass. The generator measures the "
+        "distance from the warped pixel position, pixel + offset, to the seed. Each spit is one region.",
+        {"regions": len(regions), "seeded_regions": n_seeded, "spit_regions": len(regions) - n_seeded},
     )
 
     problem = _validate(regions, region_ids, coast, cfg)
     if problem is not None:
         return None, problem
 
-    _assign_subtypes(regions, n_types)
+    orders = _assign_subtypes(regions, n_types, int(land.landmass_ids.max()), rng)
     biome_lut = np.zeros(len(regions) + 1, dtype=np.int32)
     subtype_lut = np.zeros(len(regions) + 1, dtype=np.int32)
     for r in regions:
@@ -174,15 +212,14 @@ def _attempt(land, coast, cfg, rng, recorder, attempt):
         "Each region maps to its biome type. The image has 6 gray levels: sea plus 5 biome types.",
         {"biomes": {i + 1: t.label for i, t in enumerate(cfg.types)}},
     )
-    by_subtype = sorted(regions, key=lambda r: subtype_id(r.biome_index, r.subtype_index))
     recorder.step(
         f"03f{tag}", "Sub-type IDs", subtype_ids,
-        "Each region gets a sub-type A, B, or C. For each biome type, the generator cycles A, B, C "
-        "over its regions in ID order, so every sub-type appears. The image has 16 gray levels: sea "
-        "plus 15 sub-types.",
-        {"subtype_ids": {subtype_id(r.biome_index, r.subtype_index):
-                         f"{cfg.types[r.biome_index].name} {SUBTYPE_LETTERS[r.subtype_index]}"
-                         for r in by_subtype}},
+        "Each landmass gets one sub-type of each biome type, and no two landmasses share it. For each "
+        "biome type the generator draws a random order of A, B, C over the landmasses 1, 2, 3. Every "
+        "region of that biome on a landmass gets the sub-type of that landmass. The image has 16 gray "
+        "levels: sea plus 15 sub-types.",
+        {"sub_type_per_landmass": {cfg.types[t].name: [SUBTYPE_LETTERS[i] for i in order]
+                                   for t, order in orders.items()}},
     )
     for i, t in enumerate(cfg.types):
         recorder.step(

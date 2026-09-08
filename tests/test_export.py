@@ -25,9 +25,9 @@ def _world():
     cfg = config_from_dict({"size": SIZE})
     rec = StepRecorder(None, False)
     circle = make_circle(cfg.size, cfg.circle, rec)
-    land = make_landmasses(circle, cfg.landmass, cfg.seed, rec)
+    land = make_landmasses(circle, cfg.landmass, cfg.seed, rec, cfg.spit)
     biomes = make_biomes(land, cfg.biomes, cfg.seed, rec)
-    height = make_heightmap(circle, land, biomes, cfg.heightmap, cfg.seed, rec)
+    height = make_heightmap(circle, land, biomes, cfg.heightmap, cfg.seed, rec, cfg.spit.rise_px)
     return cfg, land, biomes, height
 
 
@@ -75,6 +75,8 @@ def test_export_files(tmp_path):
     params = json.loads((tmp_path / "unreal" / "params.json").read_text(encoding="utf-8"))
     assert params["seed"] == 42
     assert params["unreal_import"]["resolution"] == SIZE
+    assert [sp["landmass"] for sp in params["spits"]] == [1, 2, 3]
+    assert all(sp["length_px"] > 0 for sp in params["spits"])
     previews = write_previews(cfg, biomes, height, tmp_path / "preview")
     assert sorted(p.name for p in previews) == [
         "biomes_color.png", "biomes_type_color.png", "height_shaded.png", "heightmap_8bit.png",
@@ -88,3 +90,18 @@ def test_export_files(tmp_path):
         b = type_map[biomes.subtype_ids == sid_b]
         assert abs(int(a.mean()) - int(b.mean())) < 25
     assert not np.array_equal(type_map, sub_map)
+
+
+def test_open_sea_takes_the_spit_biome_weight():
+    cfg, land, biomes, height = _world()
+    assert cfg.biomes.types[0].placement == "spit"
+    coast_types = [i for i, t in enumerate(cfg.biomes.types) if t.placement == "coast"]
+    assert coast_types == []
+    w = make_weight_maps(biomes.biome_ids, land.land_mask, 5, cfg.export.weight_blur_px,
+                         seabed_index=3)
+    from scipy import ndimage
+    far = ndimage.distance_transform_edt(~land.land_mask) > 6.0 * cfg.export.weight_blur_px
+    assert far.sum() > 100
+    assert np.all(w[3][far] == 255)
+    from terrain.export import seabed_biome_index
+    assert seabed_biome_index(cfg) == 0
