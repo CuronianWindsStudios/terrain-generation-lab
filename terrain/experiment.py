@@ -59,6 +59,8 @@ def build_overrides(values: dict) -> dict:
         "min_separation_pct": ("landmass", "min_separation_pct"),
         "biome_warp_px": ("biomes", "warp", "strength_px"),
         "coast_band_px": ("biomes", "coast_band_px"),
+        "balance_iterations": ("biomes", "balance_iterations"),
+        "balance_tolerance": ("biomes", "balance_tolerance"),
         "coast_distance_px": ("heightmap", "coast_distance_px"),
         "seabed_depth": ("heightmap", "seabed_depth"),
         "spit_bay_pct": ("spit", "bay_pct"),

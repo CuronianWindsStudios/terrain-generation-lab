@@ -82,6 +82,11 @@ def test_export_zip_holds_config_and_unreal_files(tmp_path):
         assert cfg["seed"] == 3 and cfg["size"] == 127
 
 
+def test_build_overrides_maps_the_biome_balance_fields():
+    o = build_overrides({"balance_iterations": 12, "balance_tolerance": 0.08})
+    assert o == {"biomes": {"balance_iterations": 12, "balance_tolerance": 0.08}}
+
+
 def test_build_overrides_partial():
     assert build_overrides({"seed": 1}) == {"seed": 1}
 

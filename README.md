@@ -72,7 +72,9 @@ later with `python -m terrain --config <folder>/config.json`.
    next seed.
 4. **Biomes.** The sand bars are the Sea Side biome. The generator scatters region seeds for the 4
    other biome types on the mainland of each landmass. Mountain Range seeds sit inland. Each
-   mainland pixel goes to the nearest seed, with a noise warp for organic borders. Each landmass
+   mainland pixel goes to the nearest seed, with a noise warp for organic borders. The generator
+   then tunes a distance scale per biome type in a few rounds, so the 4 mainland biomes share
+   each landmass about equally and no biome dominates. Each landmass
    gets one sub-type of each biome type, and no two landmasses share it. Example: landmass 1 has
    Sea Side B, landmass 2 has Sea Side C, and landmass 3 has Sea Side A. The order is random for
    each biome type.

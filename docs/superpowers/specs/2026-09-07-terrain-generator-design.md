@@ -389,6 +389,11 @@ the bar now joins the coast at both ends and encloses water.
 - Biomes: the placement `spit` marks the biome type that covers the bars. It gets no region
   seeds. Each bar is one region. The 4 other biome types get seeds on the mainland only.
   `seeds_per_landmass` counts the mainland regions, so its minimum is 4.
+- Biome areas (decided 2026-09-08): the 4 mainland biome types share each landmass about
+  equally, within `biomes.balance_tolerance`. The region growth multiplies the distance to each
+  seed by a scale per biome type, and the generator tunes the scales in `biomes.balance_iterations`
+  damped rounds. A seed is always nearest to itself, so a biome never vanishes; a duplicate seed
+  of a type that shrinks to nothing is dropped. This rule applies to the Unreal plugin too.
 - Sub-types: each landmass gets one sub-type of each biome type, and no two landmasses share it.
   For each biome type the generator draws a random order of A, B, C over the landmasses 1, 2, 3.
   Every region of that biome on a landmass gets the sub-type of that landmass.

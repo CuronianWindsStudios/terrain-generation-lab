@@ -87,6 +87,11 @@ with st.sidebar:
                                          (bi.seeds_per_landmass[0], bi.seeds_per_landmass[1]), 1,
                                          help="Mainland regions. The Sea Side spit adds 3 regions per landmass.")
         coast_band_px = st.slider("Coast band px", 5.0, 120.0, bi.coast_band_px, 5.0)
+        balance_iterations = st.slider("Biome balance rounds", 0, 60, bi.balance_iterations, 1,
+                                       help="Rounds that tune the biome sizes, so the 4 mainland biomes "
+                                            "share each landmass equally. 0 turns the balance off.")
+        balance_tolerance = st.slider("Biome balance tolerance", 0.01, 0.3, bi.balance_tolerance, 0.01,
+                                      help="Allowed difference from the equal share, as a fraction of the landmass.")
 
     with st.expander("Sea Side sand bar"):
         sp = DEFAULTS.spit
@@ -161,7 +166,8 @@ values = {
     "radius_min": radius_min, "radius_max": radius_max,
     "seed_area_pct": seed_area_pct, "min_separation_pct": min_separation_pct,
     "biome_warp_px": biome_warp_px, "seeds_min": int(seeds_min), "seeds_max": int(seeds_max),
-    "coast_band_px": coast_band_px, "coast_distance_px": coast_distance_px,
+    "coast_band_px": coast_band_px, "balance_iterations": int(balance_iterations),
+    "balance_tolerance": balance_tolerance, "coast_distance_px": coast_distance_px,
     "seabed_depth": seabed_depth,
     "spit_bay_pct": spit_bay_pct, "spit_lagoon_pct": spit_lagoon_pct,
     "spit_length_min": spit_length_min, "spit_length_max": spit_length_max,
