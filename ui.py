@@ -179,6 +179,21 @@ def cached_generate(overrides: dict, debug: bool):
     return generate(overrides, WORK_DIR, debug=debug)
 
 
+@st.cache_data(show_spinner=False)
+def cached_zip(out_dir: str, _result) -> bytes:
+    """Keyed by the output folder. Streamlit does not hash the _result argument."""
+    return export_zip(_result)
+
+
+def zip_button(result, key: str) -> None:
+    st.download_button(
+        "Download ZIP for Unreal", data=cached_zip(str(result.out_dir), result),
+        file_name=f"terrain_seed_{result.config.seed}_{result.config.size}.zip",
+        mime="application/zip", type="primary", width="stretch", key=key,
+        help="The settings as config.json and config.yaml, the Unreal files, and the previews.",
+    )
+
+
 # ---------------------------------------------------------------- generate
 if run or st.session_state.pop("pending_run", False) or "result" not in st.session_state:
     with st.spinner("Generating..."):
@@ -193,6 +208,8 @@ if st.session_state.get("error"):
 
 result = st.session_state.get("result")
 if result is not None:
+    with st.sidebar:
+        zip_button(result, "zip_sidebar")
     cfg = result.config
     retries = (result.seeds_used["landmass"] - cfg.seed) + (result.seeds_used["biomes"] - cfg.seed)
     st.caption(
@@ -243,22 +260,12 @@ with st.expander("Seed browser"):
             col.button("Use this seed", key=f"use_{s}", on_click=set_seed, args=(s,))
 
 # ---------------------------------------------------------------- save and export
-@st.cache_data(show_spinner=False)
-def cached_zip(out_dir: str, _result) -> bytes:
-    """Keyed by the output folder. Streamlit does not hash the _result argument."""
-    return export_zip(_result)
-
-
 with st.expander("Save and export", expanded=True):
     st.write("The export holds the settings as `config.json` and `config.yaml`, the Unreal files, and the previews.")
     if result is None:
         st.warning("Generate first.")
     else:
-        st.download_button(
-            "Download ZIP for Unreal", data=cached_zip(str(result.out_dir), result),
-            file_name=f"terrain_seed_{result.config.seed}_{result.config.size}.zip",
-            mime="application/zip", type="primary",
-        )
+        zip_button(result, "zip_bottom")
     target = st.text_input("Folder", value=str(Path("out") / "saved" / f"seed_{st.session_state.seed}"))
     if st.button("Save Unreal files and config to the folder"):
         if result is None:
