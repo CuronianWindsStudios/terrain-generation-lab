@@ -1,6 +1,6 @@
 # Unreal runtime plugin: design
 
-Date: 2026-09-08. Status: approved by the user in chat, spec under review.
+Date: 2026-09-08. Status: approved by the user on 2026-09-08.
 
 ## 1. Goal
 
@@ -57,7 +57,7 @@ TerrainGen/
       Public/
         TerrainConfigAsset.h      UTerrainConfig: a Data Asset mirror of the config, JSON load and save
         TerrainWorldGenerator.h   UTerrainWorldGenerator: async generation, progress, result
-        TerrainTextures.h         transient textures from the arrays
+        TerrainWorldResult.h      UTerrainWorldResult: the result as a UObject, MakeTextures on demand
         TerrainActor.h            ATerrainWorld: the tiles, the material, the water, the collision
       Private/
       Content/                    the master material, the water material, a debug material
@@ -209,18 +209,24 @@ Generate button on the actor and the `BeginPlay` flag both call it.
 Time budget at 4033 px: the stages take a few seconds on the worker. The tile build takes
 longer and runs on the game thread in slices, one tile per tick, so the frame does not stall.
 
-## 10. Textures
+## 10. Layer data for the material
 
-`TerrainTextures` makes transient `UTexture2D` objects from the result arrays:
+The tile mesh vertices lie on the heightmap pixels, so the vertices carry the layer data. No
+texture is made during generation.
 
-- Height: `PF_G16`, one texture at full size.
-- Weights: two `PF_B8G8R8A8` textures, 4 biomes in the first and the fifth in the second, at
-  full size. The material reads them as layer weights.
-- Sub-type masks: one `PF_R8` texture with the sub-type id, at full size. The material picks the
-  variant from the id.
+- Vertex color RGBA holds the weights of the first 4 biomes. The fifth weight is 255 minus the
+  sum, so nothing is lost.
+- The second UV channel holds the sub-type id and the biome id as two numbers.
+- The height is the geometry.
 
-The textures use no mips and clamp addressing. They exist for the material only; the mesh
-reads the arrays directly.
+The material reads the vertex color and the UV channel. The LOD meshes skip vertices, so the far
+LOD levels sample the weights coarser, which is right for them.
+
+Textures exist on demand only. `UTerrainWorldResult::MakeTextures()` makes transient textures
+from the arrays when something else needs an image: a minimap, the later heightfield mesh and
+Nanite experiments, or a GPU spawn system. Height is `PF_G16`, the weights are two
+`PF_B8G8R8A8` textures, the sub-type id is `PF_R8`. The CPU arrays stay in the result for
+game-thread queries.
 
 ## 11. Terrain actor
 
@@ -234,13 +240,14 @@ in a notification. With Live Coding, a C++ change in the core is one compile and
   with 253 px per tile. Each tile is a `UDynamicMeshComponent`. The vertex spacing is the pixel
   spacing. The tile builder makes `lod_levels` meshes per tile by skipping pixels, 1, 2, 4, and
   8, and switches them by camera distance. The heights come from the array, scaled by the height
-  range. The vertex normals come from the height differences. The UV is the world position over
-  the world size, so all textures sample by world position.
+  range. The vertex normals come from the height differences. UV channel 0 is the world position
+  over the world size, for tiled detail textures. Each vertex gets the vertex color and the UV
+  channel 1 values of section 10.
 - **Detail.** Below the pixel spacing the material adds a normal detail from a tiled noise
   texture. The heightmap holds no detail below 2.5 m.
 - **Material.** One master material with 5 layer slots. Each slot has 3 sub-type variants of
-  albedo, normal, and roughness. The material reads the weight textures for the layer blend and
-  the sub-type texture for the variant. The plugin content holds the master material with flat
+  albedo, normal, and roughness. The material reads the vertex color for the layer blend and
+  UV channel 1 for the variant. The plugin content holds the master material with flat
   placeholder colors per biome, the same palette as the Python previews. The game replaces the
   slots with its own textures.
 - **Collision.** Each tile cooks a simple collision mesh from its LOD 1 mesh on a worker,
@@ -289,7 +296,7 @@ Python previews by eye. There is no automatic image comparison.
 1. Plugin skeleton, `TerrainGenCore` with the config, the grid, the algorithms, and their tests.
 2. The six stages with their tests. A commandlet that runs a config and writes the height as a
    raw file, for a first look.
-3. `TerrainGen`: the config Data Asset, the async generator, the textures, and `ATerrainWorld`
+3. `TerrainGen`: the config Data Asset, the async generator, `GenerateWorld`, and `ATerrainWorld`
    with the `Generate` button and a debug quad that shows the height and the biome colors in the
    editor viewport. From here on every change is visible in the editor without a play session.
 4. `ATerrainWorld` tiles, LOD, material, collision, water. A test map in the isolated project
