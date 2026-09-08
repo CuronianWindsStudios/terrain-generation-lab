@@ -124,3 +124,24 @@ def test_deterministic():
     _, _, a = _world(3)
     _, _, b = _world(3)
     assert np.array_equal(a.subtype_ids, b.subtype_ids)
+
+
+def test_mainland_biomes_share_each_land_about_equally():
+    land, cfg, res = _world()
+    seeded = [i for i, t in enumerate(cfg.types) if t.placement != "spit"]
+    target = 1.0 / len(seeded)
+    for lm in (1, 2, 3):
+        mainland = (land.landmass_ids == lm) & ~land.spit_mask
+        total = mainland.sum()
+        for t in seeded:
+            share = (mainland & (res.biome_ids == t + 1)).sum() / total
+            assert abs(share - target) <= cfg.balance_tolerance + 0.03, (lm, cfg.types[t].name, share)
+
+
+def test_balance_can_be_switched_off():
+    rec = StepRecorder(None, False)
+    circle = make_circle(SIZE, CircleConfig(), rec)
+    land = make_landmasses(circle, LandmassConfig(), 42, rec, SpitConfig())
+    cfg = BiomesConfig(balance_iterations=0)
+    res = make_biomes(land, cfg, 42, rec)
+    assert res.biome_ids.max() == 5

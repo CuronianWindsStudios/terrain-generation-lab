@@ -91,7 +91,11 @@ def _place_region_seeds(land: LandResult, coast: np.ndarray, cfg: BiomesConfig, 
     return regions
 
 
-def _grow_regions(land: LandResult, regions: list[Region], dx: np.ndarray, dy: np.ndarray) -> np.ndarray:
+def _grow_regions(land: LandResult, regions: list[Region], dx: np.ndarray, dy: np.ndarray,
+                  scale: dict[int, float] | None = None) -> np.ndarray:
+    """Each mainland pixel goes to the nearest seed on its land. The scale multiplies the distance
+    per region id, so a biome with a scale above 1 gives up pixels at its borders. A seed is always
+    nearest to itself, so no region can lose all its pixels."""
     size = land.land_mask.shape[0]
     yy, xx = np.mgrid[0:size, 0:size].astype(np.float32)
     px = xx + dx
@@ -101,10 +105,44 @@ def _grow_regions(land: LandResult, regions: list[Region], dx: np.ndarray, dy: n
         rs = [r for r in regions if r.landmass_id == lm]
         ys, xs = np.nonzero((land.landmass_ids == lm) & ~land.spit_mask)
         wx, wy = px[ys, xs], py[ys, xs]
-        dist = np.stack([np.hypot(wx - r.seed_xy[0], wy - r.seed_xy[1]) for r in rs])
+        dist = np.stack([np.hypot(wx - r.seed_xy[0], wy - r.seed_xy[1]) * (scale.get(r.id, 1.0) if scale else 1.0)
+                         for r in rs])
         best = np.argmin(dist, axis=0)
         region_ids[ys, xs] = np.array([r.id for r in rs], dtype=np.int32)[best]
     return region_ids
+
+
+def _balance_regions(land: LandResult, regions: list[Region], dx: np.ndarray, dy: np.ndarray,
+                     cfg: BiomesConfig) -> tuple[np.ndarray, dict[int, float]]:
+    """Tunes one distance scale per biome type and land until the seeded biome types share each
+    land about equally. Returns the region ids and the scale per region id."""
+    seeded = _seeded_types(cfg)
+    target = 1.0 / max(len(seeded), 1)
+    scale: dict[int, float] = {r.id: 1.0 for r in regions}
+    region_ids = _grow_regions(land, regions, dx, dy, scale)
+    for it in range(cfg.balance_iterations):
+        # the step shrinks each round, so two neighbors cannot trade the same strip back and forth
+        exponent = 0.35 * 0.8 ** it
+        worst = 0.0
+        for lm in range(1, int(land.landmass_ids.max()) + 1):
+            mainland = (land.landmass_ids == lm) & ~land.spit_mask
+            total = float(mainland.sum())
+            if total == 0.0:
+                continue
+            for t in seeded:
+                ids = [r.id for r in regions if r.landmass_id == lm and r.biome_index == t]
+                if not ids:
+                    continue
+                share = float((mainland & np.isin(region_ids, ids)).sum()) / total
+                worst = max(worst, abs(share - target))
+                # a damped step: at most a third up or down per round, so the shares do not oscillate
+                factor = float(np.clip((max(share, 1e-3) / target) ** exponent, 0.75, 1.33))
+                for rid in ids:
+                    scale[rid] = float(np.clip(scale[rid] * factor, 0.05, 20.0))
+        if worst <= cfg.balance_tolerance:
+            break
+        region_ids = _grow_regions(land, regions, dx, dy, scale)
+    return region_ids, scale
 
 
 def _spit_regions(land: LandResult, regions: list[Region], region_ids: np.ndarray,
@@ -125,7 +163,27 @@ def _spit_regions(land: LandResult, regions: list[Region], region_ids: np.ndarra
         region_ids[pix] = region.id
 
 
+def _drop_empty_regions(regions: list[Region], region_ids: np.ndarray) -> list[Region]:
+    """The balance can shrink an extra seed of a biome type to nothing. Such a region goes away,
+    and the ids of the others stay dense. A region is kept when it has at least one pixel."""
+    counts = np.bincount(region_ids.ravel(), minlength=len(regions) + 1)
+    kept = [r for r in regions if counts[r.id] > 0]
+    remap = np.zeros(len(regions) + 1, dtype=np.int32)
+    for new_id, r in enumerate(kept, start=1):
+        remap[r.id] = new_id
+        r.id = new_id
+    region_ids[...] = remap[region_ids]
+    return kept
+
+
 def _validate(regions, region_ids, coast, cfg) -> str | None:
+    n_lands = max((r.landmass_id for r in regions), default=0)
+    for lm in range(1, n_lands + 1):
+        for t in range(len(cfg.types)):
+            if cfg.types[t].placement == "spit":
+                continue
+            if not any(r.landmass_id == lm and r.biome_index == t for r in regions):
+                return f"landmass {lm} lost every region of biome {cfg.types[t].name}"
     for r in regions:
         pix = region_ids == r.id
         if not pix.any():
@@ -184,14 +242,19 @@ def _attempt(land, coast, cfg, rng, recorder, attempt):
         {"strength_px": warp.strength_px, "frequency": warp.frequency, "octaves": warp.octaves},
     )
 
-    region_ids = _grow_regions(land, regions, dx, dy)
+    region_ids, scale = _balance_regions(land, regions, dx, dy, cfg)
+    regions = _drop_empty_regions(regions, region_ids)
     n_seeded = len(regions)
     _spit_regions(land, regions, region_ids, cfg)
     recorder.step(
         f"03d{tag}", "Region IDs", region_ids,
         "Each mainland pixel goes to the nearest seed on the same landmass. The generator measures the "
-        "distance from the warped pixel position, pixel + offset, to the seed. Each spit is one region.",
-        {"regions": len(regions), "seeded_regions": n_seeded, "spit_regions": len(regions) - n_seeded},
+        "distance from the warped pixel position, pixel + offset, to the seed, times a scale per biome "
+        "type. The generator tunes the scales in a few rounds, so the seeded biome types share each "
+        "landmass about equally and no biome dominates. Each spit is one region.",
+        {"regions": len(regions), "seeded_regions": n_seeded, "spit_regions": len(regions) - n_seeded,
+         "balance_iterations": cfg.balance_iterations, "balance_tolerance": cfg.balance_tolerance,
+         "scale": {r.id: round(scale[rid], 2) for rid, r in zip(sorted(scale), regions) if rid in scale and r.id}},
     )
 
     problem = _validate(regions, region_ids, coast, cfg)

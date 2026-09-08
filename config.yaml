@@ -30,6 +30,8 @@ biomes:
   coast_band_px: 40         # "coast" seeds lie within this distance from the coast
   inland_fraction: 0.7      # "inland" seeds lie beyond this fraction of the max coast distance
   max_retries: 10
+  balance_iterations: 25    # bias tuning rounds, so the mainland biomes share each landmass equally. 0 turns it off
+  balance_tolerance: 0.05   # allowed difference from the equal share, as a fraction of the landmass
   warp:
     strength_px: 90
     frequency: 5.0

@@ -81,6 +81,8 @@ class BiomesConfig:
     coast_band_px: float = 40.0
     inland_fraction: float = 0.7
     max_retries: int = 10
+    balance_iterations: int = 25      # bias tuning rounds so the mainland biomes share each land equally
+    balance_tolerance: float = 0.05   # allowed difference from the equal share, as a fraction of the land
     warp: WarpConfig = field(default_factory=WarpConfig)
     types: list[BiomeType] = field(default_factory=default_biome_types)
 
@@ -198,6 +200,8 @@ def config_from_dict(data: dict) -> Config:
             coast_band_px=float(bi["coast_band_px"]),
             inland_fraction=float(bi["inland_fraction"]),
             max_retries=int(bi["max_retries"]),
+            balance_iterations=int(bi["balance_iterations"]),
+            balance_tolerance=float(bi["balance_tolerance"]),
             warp=WarpConfig(**bi["warp"]),
             types=[BiomeType(**t) for t in bi["types"]],
         ),
@@ -238,6 +242,10 @@ def validate(cfg: Config) -> None:
         raise ConfigError(
             f"biomes.seeds_per_landmass must be [lo, hi] with lo >= {n_seeded} and hi >= lo. Got {lo}, {hi}."
         )
+    if cfg.biomes.balance_iterations < 0:
+        raise ConfigError(f"biomes.balance_iterations must be >= 0. Got {cfg.biomes.balance_iterations}.")
+    if not 0 < cfg.biomes.balance_tolerance < 1:
+        raise ConfigError(f"biomes.balance_tolerance must be in (0, 1). Got {cfg.biomes.balance_tolerance}.")
     sp = cfg.spit
     if not 0 < sp.length_pct[0] <= sp.length_pct[1]:
         raise ConfigError(f"spit.length_pct must be [lo, hi] with 0 < lo <= hi. Got {list(sp.length_pct)}.")
