@@ -21,6 +21,7 @@ is developed in the isolated project `S:\WorldGenUE` and moves to the final game
 | Resolution | 4033 px default. 8129 px is an option. |
 | World size | Diameter 9 km. Meters per pixel = diameter in meters / (size × diameter_pct / 100). About 2.48 m at 4033 px. |
 | Height range | Plus or minus 256 m, a setting. |
+| Naming | The plugin says Land, not Landmass: `LandId`, the Lands stage, "3 lands". The Python files keep their names. |
 | Terrain | A grid of tiles, each a Dynamic Mesh Component with LOD levels and async collision. |
 | Later experiments | Virtual Heightfield Mesh, Nanite tessellation with displacement. Not in the first version. |
 | Editor iteration | The terrain actor regenerates from a Generate button in its details panel, in the editor, with no play session. The config is a Data Asset. |
@@ -48,7 +49,7 @@ TerrainGen/
         TerrainConfig.h           the settings structs, mirrors config.json
         TerrainGrid.h             TGrid<T>: a square array with width, height, and (x, y) access
         TerrainAlgorithms.h       noise, distance transform, labels, blur, closing, level march
-        TerrainStages.h           circle, landmasses, sand bars, biomes, heightmap, export
+        TerrainStages.h           circle, lands, sand bars, biomes, heightmap, export
         TerrainResult.h           the arrays and the region list the stages produce
         TerrainGenerator.h        runs the stages in order, reports progress, supports cancel
       Private/                    one .cpp per header
@@ -91,7 +92,7 @@ and `export`. The plugin adds a `world` section:
 `TerrainGen` is a Data Asset with `UPROPERTY` fields for Blueprint and the details panel, plus
 `CallInEditor` buttons `LoadJson` and `SaveJson` for round trips with the Python UI. A converter
 copies between the two. Validation follows
-the Python `validate` function: the size list, the diameter range, exactly 3 landmasses, 5 biome
+the Python `validate` function: the size list, the diameter range, exactly 3 lands, 5 biome
 types with a profile each, `seeds_per_landmass` with a minimum of 4, and the spit and profile
 ranges. A bad config returns an error string, never an assert.
 
@@ -125,16 +126,16 @@ their rows over `ParallelFor`. Everything else is single-threaded on the worker.
 The stages follow the Python modules one to one. The rules do not change.
 
 1. **Circle.** Center distance, circle mask, edge band. `circle.py`.
-2. **Landmasses.** Seed points with rejection sampling, warp noise, radial falloff, the sea
+2. **Lands.** Seed points with rejection sampling, warp noise, radial falloff, the sea
    channel, fractal noise, threshold, keep the 3 largest areas, remove islands, fill lakes, label
    by area. Retry with the next attempt seed until the count is 3. `landmass.py`.
-3. **Sand bars.** One per landmass. Closing of the landmass, distance field of the closed shape,
+3. **Sand bars.** One per land. Closing of the land, distance field of the closed shape,
    start points on the outer coast with room, the level-line march in both directions from 8
    starts, the enclosed-water score, the strait taper, the join to the coast. A failed bar makes
-   the landmass stage retry. `spit.py`.
+   the land stage retry. `spit.py`.
 4. **Biomes.** Coast distance, region seeds for the 4 non-spit types on the mainland with the
    placement rules, warp noise, nearest-seed growth, one region per bar, validation, retry. The
-   sub-type rule: each landmass gets one sub-type of each biome type and no two landmasses share
+   sub-type rule: each land gets one sub-type of each biome type and no two lands share
    it, from a random order per biome type. `biomes.py`.
 5. **Heightmap.** Signed coast distance, the coast curve with the short rise on the bars, the
    profile mix with the per-biome blend and the bar pixels on the Sea Side profile only, the
@@ -158,16 +159,42 @@ struct FTerrainResult
     TArray<TGrid<uint8>> Weights;      // 5 maps, sum 255
     TGrid<uint8> SubtypeId;            // 0 sea, 1..15
     TGrid<uint8> BiomeId;              // 0 sea, 1..5
-    TGrid<uint8> LandmassId;           // 0 sea, 1..3
-    TArray<FTerrainRegion> Regions;    // id, landmass, biome, subtype, seed x y
-    TMap<FName, TArray<int32>> SubtypePerLandmass;
-    int32 SeedUsedLandmass, SeedUsedBiomes;
+    TGrid<uint8> LandId;              // 0 sea, 1..3
+    TArray<FTerrainRegion> Regions;    // id, land, biome, subtype, seed x y
+    TMap<FName, TArray<int32>> SubtypePerLand;
+    int32 SeedUsedLand, SeedUsedBiomes;
 };
 ```
 
 ## 9. Async generation and progress
 
-`UTerrainWorldGenerator` is a Blueprint-callable UObject.
+The entry point is one function, callable from C++ and Blueprint, in a function library:
+
+```cpp
+UFUNCTION(BlueprintCallable, Category = "TerrainGen", meta = (WorldContext = "WorldContextObject"))
+static ATerrainWorld* GenerateWorld(UObject* WorldContextObject, const FTerrainGenerateParams& Params,
+                                    FOnTerrainWorldFinished OnFinished);
+
+USTRUCT(BlueprintType)
+struct FTerrainGenerateParams
+{
+    FVector Origin;                  // world position of the circle center
+    FRotator Rotation;               // yaw of the world, default zero
+    TObjectPtr<UTerrainConfig> Config;
+    int32 SeedOverride = -1;         // -1 keeps the seed of the config
+    bool bBuildCollision = true;
+    bool bBuildWater = true;
+    bool bBuildInEditor = false;     // true when the Generate button calls it
+};
+```
+
+`GenerateWorld` spawns an `ATerrainWorld` at the origin, or reuses the one it is given, starts the
+generation, and returns the actor at once. The delegate fires on the game thread when the tiles
+are built, with the actor and an error string that is empty on success. The game is not expected
+to call this at run time in the first version, but the function exists from phase 3, and the
+Generate button on the actor and the `BeginPlay` flag both call it.
+
+`UTerrainWorldGenerator` is the UObject behind it.
 
 - `Generate(const UTerrainConfig* Config)` validates the config, then starts the stages with
   `Async(EAsyncExecution::Thread, ...)`. It returns at once.
@@ -242,12 +269,12 @@ Automation tests in `TerrainGenCore`, run with the Session Frontend or the comma
 
 - Algorithms: the distance transform against a brute-force check on a 64 px grid, the labels
   on a known picture, the blur against a known kernel sum, the closing fills a bay.
-- Landmasses: exactly 3 areas, all inside the circle, ids ordered by area, no small lakes,
+- Lands: exactly 3 areas, all inside the circle, ids ordered by area, no small lakes,
   an impossible config returns an error after the retries, same seed same output.
-- Sand bars: one bar joined to each landmass, a gap from other land, water behind the middle
+- Sand bars: one bar joined to each land, a gap from other land, water behind the middle
   of the bar, a lagoon without the strait, one contact with the strait, inside the circle.
-- Biomes: every biome on every landmass, Sea Side exactly on the bars, one sub-type per biome
-  per landmass and no two landmasses share it, regions stay on their landmass.
+- Biomes: every biome on every land, Sea Side exactly on the bars, one sub-type per biome
+  per land and no two lands share it, regions stay on their land.
 - Heightmap: the coast at sea level, the bar reaches its profile base, a higher base gives
   higher land, a negative base makes pools.
 - Export: weights add up to 255 at every pixel, the height encoding, the far sea takes the
