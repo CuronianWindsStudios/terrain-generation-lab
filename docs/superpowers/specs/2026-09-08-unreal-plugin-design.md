@@ -117,9 +117,12 @@ seed, the stage number, and the attempt number, as in Python.
 Memory at 4033 px: a float grid is 65 MB. The first version of the core (phases 1 and 2, built on
 2026-09-08) keeps every stage result alive to the end and holds 16 float grids in the heightmap
 stage, so its peak is about 1.7 GB at 4033 px and near 7 GB at 8129 px. The first task of the
-phase 3 plan is a memory pass: id grids as `uint8`, one weight grid at a time in the heightmap,
-no `CenterDistance` grid, no debug grid copies, and a measured 4033 px run that replaces these
-figures. The target stays under 600 MB at 4033 px. The plugin logs a warning above 4033 px.
+phase 3 plan was a memory pass, done on 2026-09-08: id grids as `uint8`, one weight grid at a
+time in the heightmap, no `CenterDistance` grid, no debug grid copies. The memory test measures
+about 15 MB of growth at the stage boundaries for 1009 px, which misses the peaks inside a stage;
+the export stage now holds one blurred float grid per biome type and is the likely peak. A measured
+4033 px run in the editor, with the export stage sampled, still has to replace these figures. The
+target stays under 600 MB at 4033 px. The plugin logs a warning above 4033 px.
 
 Threads inside the core: the separable passes of the distance transform and the blur split
 their rows over `ParallelFor`. Everything else is single-threaded on the worker.
@@ -176,7 +179,9 @@ The entry point is one function, callable from C++ and Blueprint, in a function 
 ```cpp
 UFUNCTION(BlueprintCallable, Category = "TerrainGen", meta = (WorldContext = "WorldContextObject"))
 static ATerrainWorld* GenerateWorld(UObject* WorldContextObject, const FTerrainGenerateParams& Params,
-                                    FOnTerrainWorldFinished OnFinished);
+                                    ATerrainWorld* Existing = nullptr);
+// Built in phase 3 with this signature: the callback is the actor's OnBuilt delegate, so a caller
+// binds it on the returned actor. Existing reuses an actor instead of spawning one.
 
 USTRUCT(BlueprintType)
 struct FTerrainGenerateParams
@@ -187,9 +192,13 @@ struct FTerrainGenerateParams
     int32 SeedOverride = -1;         // -1 keeps the seed of the config
     bool bBuildCollision = true;
     bool bBuildWater = true;
-    bool bBuildInEditor = false;     // true when the Generate button calls it
+    bool bBuildInEditor = false;     // reserved for phase 4, not read yet
 };
 ```
+
+`world.height_range_m` is the half range: the 16-bit value 65535 is +range above sea level and 0 is
+-range below it, as in the Python export. With 256 m the land can reach 256 m and the seabed floor
+sits at about -77 m with the default seabed depth.
 
 `GenerateWorld` spawns an `ATerrainWorld` at the origin, or reuses the one it is given, starts the
 generation, and returns the actor at once. The delegate fires on the game thread when the tiles
