@@ -3499,3 +3499,253 @@ git commit -m "Add the generator with progress, cancel, and debug images"
 - Spec sections 4 to 8 and 13 are covered by Tasks 1 to 14. Sections 9 to 12 (the UObject layer, `GenerateWorld`, the actor, the editor module) belong to the next plans.
 - The spec lists `TerrainAlgorithms.h` as one header; this plan also has `TerrainNoise.h`, `TerrainDebugImages.h`, and `TerrainGenerator.h`, which the spec names in its file list.
 - Every function name used across tasks matches its definition: `DistanceToMask`, `LabelComponents`, `GaussianBlur`, `Gradient`, `Dilate8`, `Closing`, `MakeNoise`, `Smoothstep`, `HashSeed`, `MakeCircle`, `MakeLands`, `MakeSpits`, `MakeBiomes`, `SubtypeId`, `MakeHeightmap`, `EncodeHeight16`, `LargestRemainder255`, `SeabedBiomeIndex`, `MakeExportArrays`, `GenerateTerrain`, `GenerateTerrainWithDebug`, `WriteDebugImages`, `WritePgm`.
+
+---
+
+### Task 15: Biome area balance
+
+**Files:**
+- Modify: `Public/TerrainConfig.h` (two fields in `FTerrainBiomesConfig`), `Private/TerrainConfig.cpp` (two validation checks)
+- Modify: `Private/TerrainStageBiomes.cpp` (`GrowRegions` takes a scale, new `BalanceRegions` and `DropEmptyRegions`, a per-type validation, `AttemptBiomes` uses them)
+- Test: `Private/Tests/BiomesTests.cpp` (add a second test), `Private/Tests/ConfigTests.cpp` (add two assertions)
+
+Python reference: S:\python-terrain-generation\terrain\biomes.py, the functions `_grow_regions`, `_balance_regions`, `_drop_empty_regions`, and `_validate`, plus the fields `balance_iterations` and `balance_tolerance` in `terrain/config.py`. Read them first. The rule: the 4 mainland biome types share each land about equally. The region growth multiplies the distance to each seed by a scale per region, and the generator tunes the scales per biome type and land in damped rounds until the worst share error is within the tolerance. A seed is always nearest to itself, so a type never vanishes; a duplicate seed of a type that shrinks to nothing is dropped and the region ids are made dense again.
+
+**Interfaces:**
+- Consumes: everything Task 11 produced.
+- Produces: `FTerrainBiomesConfig::BalanceIterations` (default 25) and `BalanceTolerance` (default 0.05f). `MakeBiomes` keeps its signature. Region ids stay dense 1..N after dropping.
+
+- [ ] **Step 1: Write the failing tests**
+
+Append to `Private/Tests/BiomesTests.cpp` before the final `#endif`:
+```cpp
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTerrainBiomeBalanceTest, "TerrainGen.Core.BiomeBalance",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FTerrainBiomeBalanceTest::RunTest(const FString& Parameters)
+{
+	const FTerrainConfig Cfg = MakeDefaultTerrainConfig();
+	TArray<int32> Seeded;
+	for (int32 T = 0; T < Cfg.Biomes.Types.Num(); ++T)
+		if (Cfg.Biomes.Types[T].Placement != ETerrainPlacement::Spit) Seeded.Add(T);
+	const float Target = 1.0f / Seeded.Num();
+
+	for (int32 Seed : { 42, 7, 3 })
+	{
+		FCircleResult Circle;
+		FLandResult Land;
+		FString Error;
+		TestTrue(TEXT("lands"), TerrainTest::MakeTestLands(Seed, true, Circle, Land, Error));
+		FBiomeResult Biomes;
+		TestTrue(TEXT("biomes"), MakeBiomes(Land, Cfg.Biomes, Seed, Biomes, Error));
+		for (int32 LandId = 1; LandId <= 3; ++LandId)
+		{
+			int32 Total = 0;
+			TArray<int32> Count;
+			Count.Init(0, Cfg.Biomes.Types.Num());
+			for (int32 I = 0; I < Land.LandMask.Num(); ++I)
+			{
+				if (Land.LandIds.Data[I] != LandId || Land.SpitMask.Data[I]) continue;
+				++Total;
+				Count[Biomes.BiomeIds.Data[I] - 1] += 1;
+			}
+			for (int32 T : Seeded)
+			{
+				const float Share = float(Count[T]) / float(Total);
+				TestTrue(FString::Printf(TEXT("seed %d land %d biome %d share %.2f near %.2f"), Seed, LandId, T, Share, Target),
+					FMath::Abs(Share - Target) <= Cfg.Biomes.BalanceTolerance + 0.03f);
+			}
+		}
+		// the region ids stay dense after a dropped duplicate seed
+		int32 MaxId = 0;
+		for (int32 V : Biomes.RegionIds.Data) MaxId = FMath::Max(MaxId, V);
+		TestEqual(TEXT("dense region ids"), MaxId, Biomes.Regions.Num());
+		for (int32 I = 0; I < Biomes.Regions.Num(); ++I) TestEqual(TEXT("region id order"), Biomes.Regions[I].Id, I + 1);
+	}
+
+	// the balance can be switched off
+	FCircleResult Circle;
+	FLandResult Land;
+	FString Error;
+	TerrainTest::MakeTestLands(42, true, Circle, Land, Error);
+	FTerrainBiomesConfig Off = Cfg.Biomes;
+	Off.BalanceIterations = 0;
+	FBiomeResult Plain;
+	TestTrue(TEXT("biomes without balance"), MakeBiomes(Land, Off, 42, Plain, Error));
+	int32 MaxBiome = 0;
+	for (int32 V : Plain.BiomeIds.Data) MaxBiome = FMath::Max(MaxBiome, V);
+	TestEqual(TEXT("all biomes present without balance"), MaxBiome, 5);
+	return true;
+}
+```
+
+Append to the config test in `Private/Tests/ConfigTests.cpp`, before `TestNotEqual(TEXT("seed hash differs by stage")...`:
+```cpp
+	TestEqual(TEXT("balance rounds"), Cfg.Biomes.BalanceIterations, 25);
+	TestTrue(TEXT("balance tolerance"), FMath::IsNearlyEqual(Cfg.Biomes.BalanceTolerance, 0.05f));
+	Bad = Cfg; Bad.Biomes.BalanceTolerance = 1.0f;
+	TestFalse(TEXT("bad balance tolerance"), ValidateTerrainConfig(Bad, Error));
+	TestTrue(TEXT("balance tolerance message"), Error.Contains(TEXT("biomes.balance_tolerance")));
+```
+
+- [ ] **Step 2: Build to verify it fails**
+
+Run: `S:\WorldGenUE\Tools\Build.ps1`
+Expected: FAIL to compile, `BalanceIterations` is not a member.
+
+- [ ] **Step 3: Add the config fields and their validation**
+
+In `Public/TerrainConfig.h`, inside `FTerrainBiomesConfig`, after `int32 MaxRetries = 10;`:
+```cpp
+	int32 BalanceIterations = 25;    // rounds that tune the biome sizes, so the mainland biomes share each land equally. 0 turns it off
+	float BalanceTolerance = 0.05f;  // allowed difference from the equal share, as a fraction of the land
+```
+
+In `Private/TerrainConfig.cpp`, in `ValidateTerrainConfig`, after the `seeds_per_land` check and before the profiles loop:
+```cpp
+	if (Cfg.Biomes.BalanceIterations < 0)
+	{
+		OutError = FString::Printf(TEXT("biomes.balance_iterations must be >= 0. Got %d."), Cfg.Biomes.BalanceIterations);
+		return false;
+	}
+	if (Cfg.Biomes.BalanceTolerance <= 0.0f || Cfg.Biomes.BalanceTolerance >= 1.0f)
+	{
+		OutError = FString::Printf(TEXT("biomes.balance_tolerance must be in (0, 1). Got %g."), Cfg.Biomes.BalanceTolerance);
+		return false;
+	}
+```
+
+- [ ] **Step 4: Change the biomes stage**
+
+In `Private/TerrainStageBiomes.cpp`, replace the whole `GrowRegions` function with:
+```cpp
+	/** Each mainland pixel goes to the nearest seed on its land. The scale multiplies the distance per
+	 *  region id, so a biome with a scale above 1 gives up pixels at its borders. A seed is always
+	 *  nearest to itself, so no biome type can lose every pixel. */
+	void GrowRegions(const FLandResult& Land, const TArray<FTerrainRegion>& Regions, const FGridF& Dx, const FGridF& Dy,
+		const TArray<float>& Scale, FGridI& OutRegionIds)
+	{
+		const int32 Size = Dx.Size;
+		OutRegionIds.Init(Size, 0);
+		for (int32 Y = 0; Y < Size; ++Y)
+		{
+			for (int32 X = 0; X < Size; ++X)
+			{
+				const int32 LandId = Land.LandIds.At(X, Y);
+				if (LandId == 0 || Land.SpitMask.At(X, Y)) continue;
+				const FVector2f Warped(X + Dx.At(X, Y), Y + Dy.At(X, Y));
+				float Best = 1e30f;
+				int32 BestId = 0;
+				for (const FTerrainRegion& R : Regions)
+				{
+					if (R.LandId != LandId) continue;
+					const float D = FVector2f::Distance(Warped, R.SeedXY) * Scale[R.Id];
+					if (D < Best) { Best = D; BestId = R.Id; }
+				}
+				OutRegionIds.At(X, Y) = BestId;
+			}
+		}
+	}
+
+	/** Tunes one distance scale per biome type and land until the seeded biome types share each land
+	 *  about equally. Scale is indexed by region id, so it has Regions.Num() + 1 entries. */
+	void BalanceRegions(const FLandResult& Land, const TArray<FTerrainRegion>& Regions, const FGridF& Dx, const FGridF& Dy,
+		const FTerrainBiomesConfig& Cfg, int32 LandCount, FGridI& OutRegionIds, TArray<float>& OutScale)
+	{
+		const TArray<int32> Seeded = SeededTypes(Cfg);
+		const float Target = 1.0f / FMath::Max(Seeded.Num(), 1);
+		OutScale.Init(1.0f, Regions.Num() + 1);
+		GrowRegions(Land, Regions, Dx, Dy, OutScale, OutRegionIds);
+		TArray<int32> Total;
+		TArray<int32> Count;
+		for (int32 It = 0; It < Cfg.BalanceIterations; ++It)
+		{
+			// the step shrinks each round, so two neighbors cannot trade the same strip back and forth
+			const float Exponent = 0.35f * FMath::Pow(0.8f, float(It));
+			Total.Init(0, LandCount + 1);
+			Count.Init(0, Regions.Num() + 1);
+			for (int32 I = 0; I < OutRegionIds.Num(); ++I)
+			{
+				const int32 LandId = Land.LandIds.Data[I];
+				if (LandId == 0 || Land.SpitMask.Data[I]) continue;
+				Total[LandId] += 1;
+				Count[OutRegionIds.Data[I]] += 1;
+			}
+			float Worst = 0.0f;
+			for (int32 LandId = 1; LandId <= LandCount; ++LandId)
+			{
+				if (Total[LandId] == 0) continue;
+				for (int32 T : Seeded)
+				{
+					int32 Pixels = 0;
+					for (const FTerrainRegion& R : Regions) if (R.LandId == LandId && R.BiomeIndex == T) Pixels += Count[R.Id];
+					const float Share = float(Pixels) / float(Total[LandId]);
+					Worst = FMath::Max(Worst, FMath::Abs(Share - Target));
+					const float Factor = FMath::Clamp(FMath::Pow(FMath::Max(Share, 1e-3f) / Target, Exponent), 0.75f, 1.33f);
+					for (const FTerrainRegion& R : Regions)
+						if (R.LandId == LandId && R.BiomeIndex == T) OutScale[R.Id] = FMath::Clamp(OutScale[R.Id] * Factor, 0.05f, 20.0f);
+				}
+			}
+			if (Worst <= Cfg.BalanceTolerance) break;
+			GrowRegions(Land, Regions, Dx, Dy, OutScale, OutRegionIds);
+		}
+	}
+
+	/** The balance can shrink an extra seed of a biome type to nothing. Such a region goes away, and the
+	 *  ids of the others stay dense 1..N. */
+	void DropEmptyRegions(TArray<FTerrainRegion>& Regions, FGridI& RegionIds)
+	{
+		TArray<int32> Count;
+		Count.Init(0, Regions.Num() + 1);
+		for (int32 V : RegionIds.Data) if (V > 0) Count[V] += 1;
+		TArray<int32> Remap;
+		Remap.Init(0, Regions.Num() + 1);
+		TArray<FTerrainRegion> Kept;
+		for (FTerrainRegion& R : Regions)
+		{
+			if (Count[R.Id] == 0) continue;
+			Remap[R.Id] = Kept.Num() + 1;
+			R.Id = Kept.Num() + 1;
+			Kept.Add(R);
+		}
+		for (int32& V : RegionIds.Data) V = Remap[V];
+		Regions = MoveTemp(Kept);
+	}
+```
+
+In `AttemptBiomes`, replace the block from `FGridI RegionIds;` through the empty-region check with:
+```cpp
+		FGridI RegionIds;
+		TArray<float> Scale;
+		BalanceRegions(Land, Regions, Dx, Dy, Cfg, LandCount, RegionIds, Scale);
+		DropEmptyRegions(Regions, RegionIds);
+		SpitRegions(Land, Regions, RegionIds, Cfg, LandCount);
+
+		for (int32 LandId = 1; LandId <= LandCount; ++LandId)
+			for (int32 T = 0; T < Cfg.Types.Num(); ++T)
+			{
+				if (Cfg.Types[T].Placement == ETerrainPlacement::Spit) continue;
+				bool bAny = false;
+				for (const FTerrainRegion& R : Regions) if (R.LandId == LandId && R.BiomeIndex == T) { bAny = true; break; }
+				if (!bAny) { OutProblem = FString::Printf(TEXT("land %d lost every region of biome %s"), LandId, *Cfg.Types[T].Name.ToString()); return false; }
+			}
+		TArray<int32> Pixels;
+		Pixels.Init(0, Regions.Num() + 1);
+		for (int32 V : RegionIds.Data) if (V > 0) Pixels[V] += 1;
+		for (const FTerrainRegion& R : Regions)
+			if (Pixels[R.Id] == 0) { OutProblem = FString::Printf(TEXT("region %d has no pixels"), R.Id); return false; }
+```
+The old call `GrowRegions(Land, Regions, Dx, Dy, RegionIds);` and the old `SpitRegions` call go away; `SpitRegions` is now called after `DropEmptyRegions`, as shown, so the bar regions get ids after the kept mainland regions.
+
+- [ ] **Step 5: Build and run to verify it passes**
+
+Run: `S:\WorldGenUE\Tools\Build.ps1` then `S:\WorldGenUE\Tools\RunTests.ps1 TerrainGen.Core.BiomeBalance`, then `S:\WorldGenUE\Tools\RunTests.ps1 TerrainGen.Core`
+Expected: `Passed  TerrainGen.Core.BiomeBalance` and every other test passes. If a share assertion fails by a little (the Perlin warp differs from Python), report the values first; the tolerance of the test is the config tolerance plus 0.03.
+
+- [ ] **Step 6: Commit**
+
+```powershell
+Set-Location S:\WorldGenUE
+git add Plugins/TerrainGen
+git commit -m "Balance the biome areas: the mainland biomes share each land equally"
+```
