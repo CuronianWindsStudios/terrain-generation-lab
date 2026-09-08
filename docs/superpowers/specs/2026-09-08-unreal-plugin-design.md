@@ -23,7 +23,8 @@ is developed in the isolated project `S:\WorldGenUE` and moves to the final game
 | Height range | Plus or minus 256 m, a setting. |
 | Terrain | A grid of tiles, each a Dynamic Mesh Component with LOD levels and async collision. |
 | Later experiments | Virtual Heightfield Mesh, Nanite tessellation with displacement. Not in the first version. |
-| Editor | An optional editor module that runs the generator, writes PNG files, and imports into a Landscape. |
+| Editor iteration | The terrain actor regenerates from a Generate button in its details panel, in the editor, with no play session. The config is a Data Asset. |
+| Editor module | An optional editor-only module that writes PNG files of the steps and imports into a Landscape. |
 
 ## 3. Non-goals
 
@@ -87,8 +88,9 @@ and `export`. The plugin adds a `world` section:
 ```
 
 `FTerrainConfig` in `TerrainGenCore` is the plain struct the stages read. `UTerrainConfig` in
-`TerrainGen` is the USTRUCT twin with `UPROPERTY` fields for Blueprint and the details panel,
-plus `LoadJson(FString)` and `SaveJson()`. A converter copies between the two. Validation follows
+`TerrainGen` is a Data Asset with `UPROPERTY` fields for Blueprint and the details panel, plus
+`CallInEditor` buttons `LoadJson` and `SaveJson` for round trips with the Python UI. A converter
+copies between the two. Validation follows
 the Python `validate` function: the size list, the diameter range, exactly 3 landmasses, 5 biome
 types with a profile each, `seeds_per_landmass` with a minimum of 4, and the spit and profile
 ranges. A bad config returns an error string, never an assert.
@@ -195,7 +197,11 @@ reads the arrays directly.
 
 ## 11. Terrain actor
 
-`ATerrainWorld` builds the terrain from a result.
+`ATerrainWorld` builds the terrain from a result. It is the iteration tool: place it in a map,
+set its config asset, and press the `Generate` button in the details panel. The button runs the
+same async generator as the game and rebuilds the tiles in the editor viewport, with the progress
+in a notification. With Live Coding, a C++ change in the core is one compile and one press away.
+`Generate` also runs on `BeginPlay` when the `bGenerateOnBeginPlay` flag is set, for the game.
 
 - **Tiles.** The world splits into square tiles of `tile_px` pixels, 16 by 16 tiles at 4033 px
   with 253 px per tile. Each tile is a `UDynamicMeshComponent`. The vertex spacing is the pixel
@@ -256,11 +262,12 @@ Python previews by eye. There is no automatic image comparison.
 1. Plugin skeleton, `TerrainGenCore` with the config, the grid, the algorithms, and their tests.
 2. The six stages with their tests. A commandlet that runs a config and writes the height as a
    raw file, for a first look.
-3. `TerrainGen`: the async generator, the textures, and a debug quad that shows the height and
-   the biome colors in the isolated project.
-4. `ATerrainWorld`: tiles, LOD, material, collision, water. A test map in the isolated project
+3. `TerrainGen`: the config Data Asset, the async generator, the textures, and `ATerrainWorld`
+   with the `Generate` button and a debug quad that shows the height and the biome colors in the
+   editor viewport. From here on every change is visible in the editor without a play session.
+4. `ATerrainWorld` tiles, LOD, material, collision, water. A test map in the isolated project
    with a loading screen widget that shows the progress and drops the player on the terrain.
-5. `TerrainGenEditor`: the utility widget, the PNG writer, the Landscape import.
+5. `TerrainGenEditor`: the utility widget, the PNG writer of the steps, the Landscape import.
 6. Experiments: Virtual Heightfield Mesh, Nanite tessellation with displacement.
 
 Each phase ends with the tests green and a commit.
